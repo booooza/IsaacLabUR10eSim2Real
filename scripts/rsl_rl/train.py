@@ -72,14 +72,14 @@ if version.parse(installed_version) < version.parse(RSL_RL_VERSION):
 
 """Rest everything follows."""
 
-import gymnasium as gym
 import os
-import torch
 from datetime import datetime
 
+import gymnasium as gym
+import isaac_lab_ur10e_sim2real_tasks.tasks  # noqa: F401
+import isaaclab_tasks  # noqa: F401
 import omni
-from rsl_rl.runners import DistillationRunner, OnPolicyRunner
-
+import torch
 from isaaclab.envs import (
     DirectMARLEnv,
     DirectMARLEnvCfg,
@@ -89,14 +89,10 @@ from isaaclab.envs import (
 )
 from isaaclab.utils.dict import print_dict
 from isaaclab.utils.io import dump_pickle, dump_yaml
-
 from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg, RslRlVecEnvWrapper
-
-import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
-
-import isaac_lab_ur10e_sim2real_tasks.tasks  # noqa: F401
+from rsl_rl.runners import DistillationRunner, OnPolicyRunner
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True

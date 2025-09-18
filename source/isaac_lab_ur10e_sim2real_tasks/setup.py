@@ -6,8 +6,8 @@
 """Installation script for the 'isaac_lab_ur10e_sim2real_tasks' python package."""
 
 import os
-import toml
 
+import toml
 from setuptools import setup
 
 # Obtain the extension data from the extension.toml file
