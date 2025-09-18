@@ -16,6 +16,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.utils import configclass
+from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
 from . import mdp
 
@@ -32,13 +33,23 @@ from isaaclab_assets.robots.cartpole import CARTPOLE_CFG  # isort:skip
 
 
 @configclass
-class IsaacLabUr10eSim2realTasksSceneCfg(InteractiveSceneCfg):
-    """Configuration for a cart-pole scene."""
+class UR10ePickPlaceSceneCfg(InteractiveSceneCfg):
+    """Configuration for the UR10e Pick-and-Place scene ."""
 
     # ground plane
     ground = AssetBaseCfg(
         prim_path="/World/ground",
         spawn=sim_utils.GroundPlaneCfg(size=(100.0, 100.0)),
+    )
+
+    # table surface for pick-and-place operations
+    table = AssetBaseCfg(
+        prim_path="/World/table",
+        spawn=sim_utils.UsdFileCfg(
+            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Mounts/Stand/stand_instanceable.usd",
+            scale=(2.0, 2.0, 1.0),
+        ),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.55, 0.0, 0.0)),
     )
 
     # robot
@@ -156,9 +167,9 @@ class TerminationsCfg:
 
 
 @configclass
-class IsaacLabUr10eSim2realTasksEnvCfg(ManagerBasedRLEnvCfg):
+class UR10ePickPlaceEnvCfg(ManagerBasedRLEnvCfg):
     # Scene settings
-    scene: IsaacLabUr10eSim2realTasksSceneCfg = IsaacLabUr10eSim2realTasksSceneCfg(num_envs=4096, env_spacing=4.0)
+    scene: UR10ePickPlaceSceneCfg = UR10ePickPlaceSceneCfg(num_envs=4096, env_spacing=4.0)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
