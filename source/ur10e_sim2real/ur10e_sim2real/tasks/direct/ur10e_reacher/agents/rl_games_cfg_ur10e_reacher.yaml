@@ -1,0 +1,107 @@
+# UR10e Reacher Environment RL-Games Configuration
+# Based on the most successful hyperparameters from the bachelor's thesis
+# Runs 1 and 2 showed best performance with SAC algorithm
+
+params:
+  seed: 42
+  
+  # Environment wrapper clipping
+  env:
+    clip_observations: 5.0
+    clip_actions: 1.0
+
+  algo:
+    name: sac
+
+  model:
+    name: soft_actor_critic
+
+  network:
+    name: soft_actor_critic
+    separate: True
+
+    space:
+      continuous:
+        mu_activation: None
+        sigma_activation: None
+        mu_init:
+          name: default
+        sigma_init:
+          name: const_initializer
+          val: 0
+        fixed_sigma: True
+    mlp:
+      units: [1024, 1024, 1024]  # Based on thesis: expanded network for complex tasks
+      activation: relu
+      d2rl: False
+
+      initializer:
+        name: default
+      regularizer:
+        name: None
+    log_std_bounds: [-20, 2]
+
+  load_checkpoint: False
+  load_path: ''
+
+  config:
+    name: ur10e_reacher
+    full_experiment_name: ur10e_reacher_sac
+    device: 'cuda:0'
+    device_name: 'cuda:0'
+    env_name: rlgpu
+    ppo: False
+    multi_gpu: False
+    mixed_precision: False
+    normalize_input: True
+    normalize_value: True
+    value_bootstrap: True
+    num_actors: -1  # Will use the number from environment config
+    
+    reward_shaper:
+      scale_value: 0.01
+    
+    normalize_advantage: True
+    
+    # Best hyperparameters from thesis Runs 1 & 2
+    gamma: 0.99
+    tau: 0.005  # From successful runs in thesis
+    init_alpha: 1.0
+    alpha_lr: 0.001  # Best performing learning rate
+    actor_lr: 0.0001  # From successful runs
+    critic_lr: 0.0001  # From successful runs  
+    critic_tau: 0.005  # From successful runs
+    batch_size: 512  # From thesis configuration
+    learning_rate: 0.001  # Best performing learning rate from thesis
+    lr_schedule: adaptive
+    schedule_type: standard
+    kl_threshold: 0.007  # Key parameter from most successful runs
+    
+    score_to_win: 2000
+    max_epochs: 5000
+    save_best_after: 1000
+    save_frequency: 200
+    print_stats: True
+    grad_norm: 1.0
+    
+    entropy_coef: 0.002  # Key parameter from most successful runs
+    truncate_grads: True
+    e_clip: 0.2
+    horizon_length: 64  # From thesis configuration
+    minibatch_size: 32768
+    mini_epochs: 5
+    critic_coef: 4
+    clip_value: True
+    seq_len: 4
+    
+    # SAC specific parameters from thesis
+    learnable_temperature: True
+    bounds_loss_coef: 0.001
+    num_seed_steps: 1000  # From successful runs (5000 in original, scaled down)
+    num_warmup_steps: 10000  # From successful runs  
+    replay_buffer_size: 1500000  # From thesis configuration
+
+    player:
+      deterministic: True
+      games_num: 100000
+      print_stats: True

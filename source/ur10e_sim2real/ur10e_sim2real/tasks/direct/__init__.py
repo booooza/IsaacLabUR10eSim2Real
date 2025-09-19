@@ -4,3 +4,5 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import gymnasium as gym  # noqa: F401
+
+from . import ur10e_reacher
