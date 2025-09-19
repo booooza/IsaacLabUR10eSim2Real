@@ -18,7 +18,6 @@ gym.register(
     disable_env_checker=True,
     kwargs={
         "env_cfg_entry_point": f"{__name__}.ur10e_reacher_env_cfg:UR10eReacherEnvCfg",
-        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_cfg.yaml",
         "rl_games_cfg_entry_point": f"{agents.__name__}:rl_games_cfg_ur10e_reacher.yaml",
     },
 )
