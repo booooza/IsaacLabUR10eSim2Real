@@ -13,7 +13,7 @@ from . import agents
 
 
 gym.register(
-    id="Template-Isaac-Lab-Ur10e-Sim2real-PickPlace-v0",
+    id="Template-Isaac-Lab-UR10e-Sim2Real-PickPlace-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={

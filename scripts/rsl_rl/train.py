@@ -76,7 +76,7 @@ import os
 from datetime import datetime
 
 import gymnasium as gym
-import isaac_lab_ur10e_sim2real_tasks.tasks  # noqa: F401
+import ur10e_sim2real.tasks  # noqa: F401
 import isaaclab_tasks  # noqa: F401
 import omni
 import torch

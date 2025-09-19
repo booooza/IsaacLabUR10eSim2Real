@@ -13,11 +13,11 @@ from . import agents
 
 
 gym.register(
-    id="Template-Isaac-Lab-Ur10e-Sim2real-Tasks-v0",
+    id="Template-Isaac-Lab-UR10e-Sim2Real-Cartpole-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
-        "env_cfg_entry_point": f"{__name__}.template_env_cfg:IsaacLabUr10eSim2realTasksEnvCfg",
+        "env_cfg_entry_point": f"{__name__}.template_env_cfg:UR10eSim2RealCartpoleEnvCfg",
         "rl_games_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_cfg.yaml",
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:PPORunnerCfg",
         "skrl_amp_cfg_entry_point": f"{agents.__name__}:skrl_amp_cfg.yaml",

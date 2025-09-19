@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 
-from isaac_lab_ur10e_sim2real_tasks.robots.jetbot import JETBOT_CONFIG
+from ur10e_sim2real.robots.jetbot import JETBOT_CONFIG
 from isaaclab.assets import ArticulationCfg
 from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg

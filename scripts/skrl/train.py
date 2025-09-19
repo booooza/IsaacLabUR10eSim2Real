@@ -95,7 +95,7 @@ if args_cli.ml_framework.startswith("torch"):
 elif args_cli.ml_framework.startswith("jax"):
     from skrl.utils.runner.jax import Runner
 
-import isaac_lab_ur10e_sim2real_tasks.tasks  # noqa: F401
+import ur10e_sim2real.tasks  # noqa: F401
 import isaaclab_tasks  # noqa: F401
 from isaaclab.envs import (
     DirectMARLEnv,

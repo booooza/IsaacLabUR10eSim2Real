@@ -66,7 +66,7 @@ import random
 import time
 
 import gymnasium as gym
-import isaac_lab_ur10e_sim2real_tasks.tasks  # noqa: F401
+import ur10e_sim2real.tasks  # noqa: F401
 import isaaclab_tasks  # noqa: F401
 import torch
 from isaaclab.envs import (

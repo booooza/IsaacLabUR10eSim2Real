@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import math
-from isaac_lab_ur10e_sim2real_tasks.tasks.direct.isaac_lab_tutorial.isaac_lab_tutorial_env_cfg import IsaacLabTutorialEnvCfg
+from ur10e_sim2real.tasks.direct.isaac_lab_tutorial.isaac_lab_tutorial_env_cfg import IsaacLabTutorialEnvCfg
 import torch
 from collections.abc import Sequence
 

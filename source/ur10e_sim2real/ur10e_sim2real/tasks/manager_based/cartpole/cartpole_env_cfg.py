@@ -32,7 +32,7 @@ from isaaclab_assets.robots.cartpole import CARTPOLE_CFG  # isort:skip
 
 
 @configclass
-class IsaacLabUr10eSim2realTasksSceneCfg(InteractiveSceneCfg):
+class UR10eSim2RealCartpoleSceneCfg(InteractiveSceneCfg):
     """Configuration for a cart-pole scene."""
 
     # ground plane
@@ -156,9 +156,9 @@ class TerminationsCfg:
 
 
 @configclass
-class IsaacLabUr10eSim2realTasksEnvCfg(ManagerBasedRLEnvCfg):
+class UR10eSim2RealCartpoleEnvCfg(ManagerBasedRLEnvCfg):
     # Scene settings
-    scene: IsaacLabUr10eSim2realTasksSceneCfg = IsaacLabUr10eSim2realTasksSceneCfg(num_envs=4096, env_spacing=4.0)
+    scene: UR10eSim2RealCartpoleSceneCfg = UR10eSim2RealCartpoleSceneCfg(num_envs=4096, env_spacing=4.0)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()

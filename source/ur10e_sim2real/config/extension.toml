@@ -11,7 +11,7 @@ title = "Isaac Lab Pick-and-Place Tasks for the UR10e Robot"
 author = "Marc Bischof"
 maintainer = "Marc Bischof"
 description="Sim-to-Real Transfer for Vision-Based Pick-and-Place"
-repository = "https://github.com/booooza/IsaacLabUR10eSim2RealTasks"
+repository = "https://github.com/booooza/IsaacLabUR10eSim2Real"
 keywords = ["extension", "sim-to-real", "isaaclab", "robotics"]
 
 [dependencies]
@@ -23,7 +23,7 @@ keywords = ["extension", "sim-to-real", "isaaclab", "robotics"]
 # NOTE: Add additional dependencies here
 
 [[python.module]]
-name = "isaac_lab_ur10e_sim2real_tasks"
+name = "ur10e_sim2real"
 
 [isaaclab_settings]
 # TODO: Uncomment and list any apt dependencies here.

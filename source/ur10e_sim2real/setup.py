@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Installation script for the 'isaac_lab_ur10e_sim2real_tasks' python package."""
+"""Installation script for the 'ur10e_sim2real' python package."""
 
 import os
 
@@ -23,8 +23,8 @@ INSTALL_REQUIRES = [
 
 # Installation operation
 setup(
-    name="isaac_lab_ur10e_sim2real_tasks",
-    packages=["isaac_lab_ur10e_sim2real_tasks"],
+    name="ur10e_sim2real",
+    packages=["ur10e_sim2real"],
     author=EXTENSION_TOML_DATA["package"]["author"],
     maintainer=EXTENSION_TOML_DATA["package"]["maintainer"],
     url=EXTENSION_TOML_DATA["package"]["repository"],
