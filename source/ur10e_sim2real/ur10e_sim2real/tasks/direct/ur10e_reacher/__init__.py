@@ -18,7 +18,8 @@ gym.register(
     disable_env_checker=True,
     kwargs={
         "env_cfg_entry_point": f"{__name__}.ur10e_reacher_env_cfg:UR10eReacherEnvCfg",
-        "rl_games_cfg_entry_point": f"{agents.__name__}:rl_games_cfg_ur10e_reacher.yaml",
+        "rl_games_cfg_entry_point": f"{agents.__name__}:rl_games_ur10e_reacher_sac_thesis.yaml",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_cfg.yaml",
     },
 )
 
@@ -28,6 +29,7 @@ gym.register(
     disable_env_checker=True,
     kwargs={
         "env_cfg_entry_point": f"{__name__}.ur10e_reacher_env_cfg:UR10eReacherEnvCfgPlay",
-        "rl_games_cfg_entry_point": f"{agents.__name__}:rl_games_cfg_ur10e_reacher.yaml",
+        "rl_games_cfg_entry_point": f"{agents.__name__}:rl_games_ur10e_reacher_sac_thesis.yaml",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_cfg.yaml",
     },
 )

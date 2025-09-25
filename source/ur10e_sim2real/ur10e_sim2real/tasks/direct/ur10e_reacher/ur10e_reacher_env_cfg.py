@@ -9,76 +9,140 @@ from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 import isaaclab.sim as sim_utils
 
+
 @configclass
 class UR10eReacherEnvCfg(DirectRLEnvCfg):
-    # env
-    decimation = 2  # 60Hz control frequency like thesis
-    episode_length_s = 5.0 # Should give ~600 timesteps at 120Hz like thesis
-    # Number of environments to run in parallel
-    num_envs = 512
+    wandb_run = True
+    wandb_project = "ur10e-sim2real"
+    wandb_entity = "booooza-"
+
+    decimation = 2  # 60Hz control frequency (120Hz / 2)
+    episode_length_s = 10.0  # 600 timesteps at 60Hz (thesis requirement)
+    
+    # Number of environments (thesis used 512, but start smaller for debugging)
+    num_envs = 256
+    
     # Spaces definition
     action_space = 6  # 6 joints of UR10e
     observation_space = 29  # Based on bachelor's thesis: joint pos (6) + joint vel (6) + goal pos (3) + goal rot (4) + relative rot (4) + actions (6)
     state_space = 0
     
-    # simulation
-    sim: SimulationCfg = SimulationCfg(dt=1 / 120, render_interval=decimation)
-    
-    # robot configuration
-    robot_cfg: ArticulationCfg = UR10e_CFG.replace(prim_path="/World/envs/env_.*/Robot")
-    
-    # scene
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(
-        num_envs=num_envs, 
-        env_spacing=2.0, 
-        replicate_physics=True
+    # Simulation settings
+    sim: SimulationCfg = SimulationCfg(
+        dt=1 / 120,  # 120Hz physics
+        render_interval=decimation,
+        physx=sim_utils.PhysxCfg(
+            enable_ccd=True,
+            bounce_threshold_velocity=0.2,
+            friction_offset_threshold=0.04,
+            friction_correlation_distance=0.025,
+        ),
     )
     
-    # Joint names for UR10e
+    # Robot configuration
+    robot_cfg: ArticulationCfg = UR10e_CFG.replace(
+        prim_path="/World/envs/env_.*/Robot",
+        spawn=UR10e_CFG.spawn.replace(
+            # Enhanced collision properties for better debugging
+            collision_props=sim_utils.CollisionPropertiesCfg(
+                collision_enabled=True,
+                contact_offset=0.005,
+                rest_offset=0.0,
+            ),
+            # Enhanced rigid body properties
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                disable_gravity=False,
+                max_linear_velocity=1000.0,
+                max_angular_velocity=1000.0,
+                max_depenetration_velocity=5.0,
+            ),
+        ),
+    )
+    
+    # Scene configuration
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(
+        num_envs=num_envs,
+        env_spacing=2.0,
+        replicate_physics=True,
+    )
+    
+    # Joint names for UR10e (exact thesis setup)
     joint_names = [
         "shoulder_pan_joint",
         "shoulder_lift_joint", 
         "elbow_joint",
         "wrist_1_joint",
         "wrist_2_joint",
-        "wrist_3_joint"
+        "wrist_3_joint",
     ]
     
-    # Goal object configuration
-    goal_object_cfg: RigidObjectCfg = RigidObjectCfg(
-        prim_path="/World/envs/env_.*/Goal",
-        spawn=sim_utils.SphereCfg(
-            radius=0.05,
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
-            mass_props=sim_utils.MassPropertiesCfg(mass=1.0),
-            collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0), metallic=0.2),
-        ),
-        init_state=RigidObjectCfg.InitialStateCfg(pos=[0.5, 0.5, 0.5], rot=[1.0, 0.0, 0.0, 0.0]),
-    )
-    
     # Reward scales (based on bachelor's thesis)
-    distance_reward_scale = -2.0 #1.0
-    rotation_reward_scale = 1.0 # 0.5
-    action_penalty_scale = -0.0002 # 0.01
+    distance_reward_scale = -2.0
+    rotation_reward_scale = 1.0
+    action_penalty_scale = -0.0002
     reach_bonus = 250.0
+    rot_eps = 0.1
     
-    # Reach threshold
-    reach_distance_threshold = 0.1  # meters (10cm)
-    reach_rotation_threshold = 0.1   # radians
+    success_tolerance = 0.1  # 0.1m tolerance (10cm)
     
-    # Action smoothing
-    action_scale = 1.0
+    action_scale = 20 * (1/120)  # dt from sim = 1/120Hz → ≈0.167
     
-    # Goal reset ranges (based on thesis workspace)
+    # Observation scaling (thesis specific)
+    vel_obs_scale = 0.2  # Exact thesis velObsScale value
+    
+    # Goal position ranges (exact thesis workspace)
     goal_position_range = {
-        "x": (0.1, 0.9),  # Forward reach
-        "y": (-0.4, 0.4), # Left-right
-        "z": (0.1, 0.8),  # Up-down  
+        "x": (0.3, 0.9),   # Forward reach (thesis values)
+        "y": (-0.3, 0.3),  # Left-right (thesis values)
+        "z": (0.2, 0.6),   # Up-down (thesis values)
     }
+    
+    # Debug configuration
+    debug_print_interval = 60  # Print debug info every 60 steps (1 second at 60Hz)
+    enable_debug_visualization = True
+    
+    def __post_init__(self):
+        """Post initialization to validate configuration."""
+        super().__post_init__()
+        
+        # Validate thesis parameters
+        assert self.distance_reward_scale < 0, "Distance reward scale must be negative (thesis)"
+        assert self.action_penalty_scale < 0, "Action penalty scale must be negative (thesis)"
+        assert self.reach_bonus > 0, "Reach bonus must be positive (thesis)"
+        assert self.success_tolerance > 0, "Success tolerance must be positive"
+        assert self.vel_obs_scale > 0, "Velocity observation scale must be positive"
+        
+        # Validate workspace
+        x_range = self.goal_position_range["x"]
+        y_range = self.goal_position_range["y"] 
+        z_range = self.goal_position_range["z"]
+        
+        assert x_range[1] > x_range[0], "Invalid x range"
+        assert y_range[1] > y_range[0], "Invalid y range"
+        assert z_range[1] > z_range[0], "Invalid z range"
+        assert x_range[0] > 0, "X range must be positive (forward reach)"
+        assert z_range[0] > 0, "Z range must be positive (above ground)"
+        
+        # Calculate expected observation space size
+        expected_obs_size = (
+            len(self.joint_names) +    # Joint positions (6)
+            len(self.joint_names) +    # Joint velocities (6)  
+            3 +                        # Goal position (3)
+            4 +                        # Goal orientation (4)
+            4 +                        # Relative orientation (4)
+            len(self.joint_names)      # Previous actions (6)
+        )
+        assert self.observation_space == expected_obs_size, f"Observation space mismatch: expected {expected_obs_size}, got {self.observation_space}"
+        
+        print(f"UR10eReacherEnvCfg validation passed!")
+        print(f"  Environments: {self.num_envs}")
+        print(f"  Episode length: {self.episode_length_s}s ({self.episode_length_s * 60:.0f} steps)")
+        print(f"  Action space: {self.action_space}")
+        print(f"  Observation space: {self.observation_space}")
+        print(f"  Workspace: x{x_range}, y{y_range}, z{z_range}")
 
 
-@configclass  
+@configclass
 class UR10eReacherEnvCfgPlay(UR10eReacherEnvCfg):
     """Configuration for playing with the UR10e reacher environment."""
     
@@ -86,12 +150,22 @@ class UR10eReacherEnvCfgPlay(UR10eReacherEnvCfg):
         # post init of parent
         super().__post_init__()
         
-        # make a smaller scene for play/visualization
         self.scene.num_envs = 1
-        self.scene.env_spacing = 2.5
+        self.scene.env_spacing = 3.0  # More space for visualization
         
-        # longer episodes for manual testing
-        self.episode_length_s = 1.0
+        # Longer episodes for manual testing
+        self.episode_length_s = 30.0
         
-        # modify action scaling for more responsive control
-        self.action_scale = 0.2
+        # Slower actions for manual control and observation
+        self.action_scale = 0.05
+        
+        # More frequent debug prints
+        self.debug_print_interval = 30  # Every 0.5 seconds
+        
+        # Enhanced visualization
+        self.enable_debug_visualization = True
+        
+        print(f"UR10eReacherEnvCfgPlay configured for debugging:")
+        print(f"  Single environment with enhanced visualization")
+        print(f"  30s episodes, slower actions, frequent debug prints")
+

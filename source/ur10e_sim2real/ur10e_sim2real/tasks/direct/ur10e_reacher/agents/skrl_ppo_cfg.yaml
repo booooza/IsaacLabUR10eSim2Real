@@ -1,0 +1,76 @@
+seed: 42
+# Models are instantiated using skrl's model instantiator utility
+# https://skrl.readthedocs.io/en/latest/api/utils/model_instantiators.html
+models:
+  separate: False # Use shared network like tutorial
+  policy: # see gaussian_model parameters
+    class: GaussianMixin
+    clip_actions: False
+    clip_log_std: True
+    min_log_std: -20.0
+    max_log_std: 2.0
+    initial_log_std: 0.0 # Start with more exploration
+    network:
+      - name: net
+        input: STATES
+        layers: [256, 128, 64] # Increased from [64, 64] based on thesis successful runs
+        activations: elu # Match tutorial activation
+    output: ACTIONS
+  value: # see deterministic_model parameters
+    class: DeterministicMixin
+    clip_actions: False
+    network:
+      - name: net
+        input: STATES
+        layers: [256, 128, 64] # Match policy size
+        activations: elu
+    output: ONE
+
+# Rollout memory
+# https://skrl.readthedocs.io/en/latest/api/memories/random.html
+memory:
+  class: RandomMemory
+  memory_size: -1 # automatically determined (same as agent:rollouts)
+
+# PPO agent configuration (field names are from PPO_DEFAULT_CONFIG)
+# https://skrl.readthedocs.io/en/latest/api/agents/ppo.html
+agent:
+  class: PPO
+  rollouts: 64 # Increased from 32 based on thesis horizon_length
+  learning_epochs: 5 # Based on thesis mini_epochs
+  mini_batches: 8
+  discount_factor: 0.99
+  lambda: 0.95 # Based on thesis tau parameter
+  learning_rate: 5.0e-03 # Higher learning rate from thesis best PPO run (Run 4)
+  learning_rate_scheduler: KLAdaptiveLR
+  learning_rate_scheduler_kwargs:
+    kl_threshold: 0.008 # From thesis PPO experiments
+  state_preprocessor: RunningStandardScaler
+  state_preprocessor_kwargs: null
+  value_preprocessor: RunningStandardScaler
+  value_preprocessor_kwargs: null
+  random_timesteps: 0
+  learning_starts: 0
+  grad_norm_clip: 1.0 # Based on thesis grad_norm
+  ratio_clip: 0.2 # Based on thesis e_clip
+  value_clip: 0.2 # Based on thesis settings
+  clip_predicted_values: True
+  entropy_loss_scale: 0.0 # Based on thesis entropy_coef
+  value_loss_scale: 4.0 # Based on thesis critic_coef
+  kl_threshold: 0.008 # Match learning_rate_scheduler threshold
+  rewards_shaper_scale: 0.01 # Based on thesis reward_shaper scale_value
+  time_limit_bootstrap: False
+
+  # logging and checkpoint
+  experiment:
+    directory: "ur10e_reacher_simple"
+    experiment_name: ""
+    write_interval: auto
+    checkpoint_interval: auto
+
+# Sequential trainer
+# https://skrl.readthedocs.io/en/latest/api/trainers/sequential.html
+trainer:
+  class: SequentialTrainer
+  timesteps: 180000 # based on thesis experiments (180k-300k timesteps)
+  environment_info: log
