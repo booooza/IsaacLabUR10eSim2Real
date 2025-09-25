@@ -70,6 +70,9 @@ class UR10eReacherEnv(DirectRLEnv):
         # Reach tracking
         self.goal_reached = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.consecutive_reach_count = torch.zeros(self.num_envs, device=self.device)
+
+        # Store cumulative rewards
+        self.cumulative_reward = 0.0
         
         # Store joint limits for normalization
         joint_limits = self.robot.data.soft_joint_pos_limits[:, self.joint_ids, :]
@@ -185,16 +188,22 @@ class UR10eReacherEnv(DirectRLEnv):
         if success_mask.any():
             print(f"SUCCESS!!! Env(s) {success_mask.nonzero(as_tuple=True)[0].cpu().numpy()} reached the goal!")
 
+        # Update cumulative rewards
+        self.cumulative_reward += reward.mean().item()
+
         # Log to wandb if run is active
         if wandb.run is not None:
             wandb.log({
+                "step": self.common_step_counter,
                 "reward/total_mean": reward.mean().item(),
                 "reward/avg_dgoal": dgoal.mean().item(),
                 "reward/avg_action_penalty": action_penalty,
+                "reward/cumulative": self.cumulative_reward,
+                "reward/running_avg": self.cumulative_reward / (self.common_step_counter + 1),
                 "metrics/success_count": int(success_mask.sum().item()),
                 "metrics/success_rate": float(success_mask.float().mean().item()),
             })
-        
+
         return reward
     
     def _get_rewards_thesis(self) -> torch.Tensor:
@@ -235,6 +244,9 @@ class UR10eReacherEnv(DirectRLEnv):
         # Compute success mask
         success_mask = dgoal < self.cfg.success_tolerance
 
+        # Update cumulative rewards
+        self.cumulative_reward += total_reward.mean().item()
+
         # Log to wandb if run is active
         if wandb.run is not None:
             wandb.log({
@@ -243,6 +255,8 @@ class UR10eReacherEnv(DirectRLEnv):
                 "reward/rotation_mean": rrot.mean().item(),
                 "reward/action_penalty_mean": ract.mean().item(),
                 "reward/reach_bonus_mean": reach_bonus.mean().item(),
+                "reward/cumulative": self.cumulative_reward,
+                "reward/running_avg": self.cumulative_reward / (self.common_step_counter + 1),
                 "metrics/avg_dgoal": dgoal.mean().item(),
                 "metrics/success_count": int(success_mask.sum().item()),
                 "metrics/success_rate": float(success_mask.float().mean().item()),
