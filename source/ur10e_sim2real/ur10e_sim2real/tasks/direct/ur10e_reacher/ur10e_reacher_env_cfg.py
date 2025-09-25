@@ -13,6 +13,7 @@ import isaaclab.sim as sim_utils
 @configclass
 class UR10eReacherEnvCfg(DirectRLEnvCfg):
     wandb_run = True
+    wandb_run_id = None
     wandb_project = "ur10e-sim2real"
     wandb_entity = "booooza-"
 

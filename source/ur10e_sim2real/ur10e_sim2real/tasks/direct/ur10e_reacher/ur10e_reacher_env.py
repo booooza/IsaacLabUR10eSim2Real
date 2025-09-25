@@ -82,6 +82,8 @@ class UR10eReacherEnv(DirectRLEnv):
 
         if cfg.wandb_run:
             wandb.init(
+                id=cfg.wandb_run_id,
+                resume="allow",
                 project=self.cfg.wandb_project,
                 entity=self.cfg.wandb_entity,
                 name=datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
