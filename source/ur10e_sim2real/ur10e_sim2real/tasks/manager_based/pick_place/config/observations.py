@@ -46,6 +46,7 @@ class PickPlaceObservationsCfg:
                     "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"]
                 )
             },
+            # noise=GaussianNoise(mean=0.0, std=0.001),  # Encoder noise
         )
         
         gripper_state = ObservationTermCfg(
@@ -53,16 +54,17 @@ class PickPlaceObservationsCfg:
             params={
                 "asset_cfg": SceneEntityCfg("robot", joint_names=["finger_joint"]) 
             },
+            # noise=GaussianNoise(mean=0.0, std=0.01),  # Gripper noise
         )
         
         # Task-specific (with noise)
-        object_pose_noisy = ObservationTermCfg(
+        object_pose = ObservationTermCfg(
             func=root_pos_w,
             params={"asset_cfg": SceneEntityCfg("object")},
             # noise=GaussianNoise(mean=0.0, std=0.01),  # Position noise
         )
         
-        target_pose_noisy = ObservationTermCfg(
+        target_pose = ObservationTermCfg(
             func=root_pos_w, 
             params={"asset_cfg": SceneEntityCfg("target")},
             # noise=GaussianNoise(mean=0.0, std=0.01),
@@ -85,38 +87,8 @@ class PickPlaceObservationsCfg:
             self.concatenate_terms = True
     
     @configclass
-    class CriticCfg(ObservationGroupCfg):
+    class CriticCfg(PolicyCfg):
         """Critic observations (privileged, no noise)."""
-        
-        # All actor observations (without noise)
-        joint_pos = ObservationTermCfg(
-            func=joint_pos,
-            params={
-                "asset_cfg": SceneEntityCfg(
-                    "robot", 
-                    joint_names=["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", 
-                    "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"]
-                )
-            },
-        )
-        
-        gripper_state = ObservationTermCfg(
-            func=mdp.joint_pos_rel,
-            params={
-                "asset_cfg": SceneEntityCfg("robot", joint_names=["finger_joint"])
-            },
-        )
-        
-        # Ground truth poses (no noise)
-        object_pose_gt = ObservationTermCfg(
-            func=root_pos_w,
-            params={"asset_cfg": SceneEntityCfg("object")},
-        )
-        
-        target_pose_gt = ObservationTermCfg(
-            func=root_pos_w,
-            params={"asset_cfg": SceneEntityCfg("target")},
-        )
         
         # Velocities (privileged)
         joint_vel = ObservationTermCfg(
@@ -155,9 +127,7 @@ class PickPlaceObservationsCfg:
                 "object_cfg": SceneEntityCfg("object"),
                 "target_cfg": SceneEntityCfg("target"),
             }
-        )
-        
-        prev_actions = ObservationTermCfg(func=mdp.last_action)
+        )        
         
         def __post_init__(self):
             self.enable_corruption = False

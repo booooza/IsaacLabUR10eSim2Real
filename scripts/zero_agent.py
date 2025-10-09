@@ -57,7 +57,7 @@ def main():
             # compute zero actions
             actions = torch.zeros(env.action_space.shape, device=env.unwrapped.device)
             # apply actions
-            env.step(actions)
+            obs, reward, terminated, truncated, info = env.step(actions)
 
     # close the simulator
     env.close()

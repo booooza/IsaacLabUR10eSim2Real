@@ -196,31 +196,3 @@ def ee_to_object_relative_pose(
     rel_quat = quat_mul(object_quat, quat_inv(ee_quat))
     
     return torch.cat([rel_pos, rel_quat], dim=-1)
-
-def ee_to_object_distance_components(
-    env: "ManagerBasedRLEnv",
-    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
-    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
-) -> torch.Tensor:
-    """Separate X, Y, Z distance components from EE to object.
-    
-    Better than single distance for learning directional control.
-    
-    Args:
-        env: The environment instance.
-        object_cfg: Configuration for the object entity.
-        ee_frame_cfg: Configuration for the end-effector frame.
-    
-    Returns:
-        Distance components tensor shaped (num_envs, 3): [dx, dy, dz]
-    """
-    object_entity = env.scene[object_cfg.name]
-    ee_frame = env.scene[ee_frame_cfg.name]
-    
-    object_pos = object_entity.data.root_pos_w[:, :3]
-    ee_pos = ee_frame.data.target_pos_w[..., 0, :3]
-    
-    # Signed distance in each axis
-    distance_vector = object_pos - ee_pos
-    
-    return distance_vector
