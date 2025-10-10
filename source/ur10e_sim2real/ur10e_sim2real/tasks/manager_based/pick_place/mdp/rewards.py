@@ -357,3 +357,33 @@ def ee_orientation_penalty(
     penalty = -error / 3.14159
     
     return penalty
+
+def reach_success(
+    env: "ManagerBasedRLEnv",
+    threshold: float = 0.02,  # 2cm tolerance
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+) -> torch.Tensor:
+    """Binary success indicator for reaching task.
+    
+    Args:
+        env: The environment instance.
+        threshold: Distance threshold for success (meters).
+        object_cfg: Configuration for the object entity.
+        ee_frame_cfg: Configuration for the end-effector frame.
+    
+    Returns:
+        Success tensor shaped (num_envs,) with 1.0 for success, 0.0 for failure.
+    """
+    object_entity = env.scene[object_cfg.name]
+    ee_frame = env.scene[ee_frame_cfg.name]
+    
+    object_pos = object_entity.data.root_pos_w[:, :3]
+    ee_pos = ee_frame.data.target_pos_w[..., 0, :3]
+    
+    distance = torch.norm(object_pos - ee_pos, p=2, dim=-1)
+    success = (distance < threshold).float()
+
+    env.extras['reach_success'] = success.cpu().numpy()  # Store for logging
+    
+    return success

@@ -52,7 +52,7 @@ class PickPlaceObservationsCfg:
         gripper_state = ObservationTermCfg(
             func=joint_pos_rel,
             params={
-                "asset_cfg": SceneEntityCfg("robot", joint_names=["finger_joint"]) 
+                "asset_cfg": SceneEntityCfg("robot", joint_names=["robotiq_hande_left_finger_joint"]) 
             },
             # noise=GaussianNoise(mean=0.0, std=0.01),  # Gripper noise
         )

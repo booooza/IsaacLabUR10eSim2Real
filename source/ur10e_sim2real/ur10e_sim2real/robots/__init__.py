@@ -1,1 +1,1 @@
-from .ur10e import UR10e_CFG
+from .ur10e import UR10e_HANDE_GRIPPER_CFG

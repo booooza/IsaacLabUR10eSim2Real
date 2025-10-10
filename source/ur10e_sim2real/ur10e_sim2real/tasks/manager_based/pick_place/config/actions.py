@@ -50,9 +50,13 @@ class PickPlaceActionsCfg:
         use_default_offset=True,  # Relative to current position
     )
     
-    # gripper_action = BinaryJointVelocityActionCfg(
-    #     asset_name="robot",
-    #     joint_names=["finger_joint"],
-    #     open_command_expr={"finger_joint": -0.04},
-    #     close_command_expr={"finger_joint": 0.04},
-    # )
+    # Gripper with centered action space
+    # Action: [-1, 1] → Gripper: [0, 0.025]
+    # -1.0 = closed (0.0), 0.0 = half open (0.0125), 1.0 = fully open (0.025)
+    gripper = JointPositionActionCfg(
+        asset_name="robot",
+        joint_names=["robotiq_hande_left_finger_joint"],
+        scale=0.0125,         # Half the range (0.025 / 2)
+        offset=0.0125,        # Center at half-open position
+        use_default_offset=False,  # Don't use articulation default
+    )

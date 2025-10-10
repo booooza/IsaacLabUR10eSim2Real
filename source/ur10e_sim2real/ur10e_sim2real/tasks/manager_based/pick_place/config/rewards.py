@@ -58,6 +58,16 @@ class PickPlaceRewardsCfg:
         },
     )
     
+    reach_success = RewardTermCfg(
+        func=mdp.reach_success,
+        weight=0.0,  # Zero weight - only for tracking
+        params={
+            "threshold": 5.00,  # 5cm
+            "object_cfg": SceneEntityCfg("object"),
+            "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+        },
+    )
+
     # Sparse success reward
     grasp_success = RewardTermCfg(
         func=grasp_success_reward,
