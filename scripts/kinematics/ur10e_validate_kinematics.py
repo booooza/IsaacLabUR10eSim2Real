@@ -46,9 +46,19 @@ from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.math import euler_xyz_from_quat
 from isaaclab_assets import UR10e_CFG
+from source.ur10e_sim2real.ur10e_sim2real.robots.ur10e import UR10e_HANDE_GRIPPER_CFG
 
 # Import the analytical FK class
 from scripts.kinematics.ur10e_kinematics import UR10eKinematics
+from cobot_modelling_control import model_forwardk, model_params
+from cobot_modelling_control.model_utils import rotm_to_axisangle
+
+ISAAC_TO_ANALYTICAL_BASE_TRANSFORM = np.array([
+    [-1,  0,  0,  0],
+    [ 0, -1,  0,  0],
+    [ 0,  0,  1,  0],
+    [ 0,  0,  0,  1]
+])
 
 @configclass
 class ValidationSceneCfg(InteractiveSceneCfg):
@@ -64,16 +74,20 @@ class ValidationSceneCfg(InteractiveSceneCfg):
         prim_path="/World/Light", spawn=sim_utils.DomeLightCfg(intensity=3000.0, color=(0.75, 0.75, 0.75))
     )
     
-    robot: Articulation = UR10e_CFG.replace(
+    robot: Articulation = UR10e_HANDE_GRIPPER_CFG.replace(
         prim_path="{ENV_REGEX_NS}/Robot",
-        init_state=UR10e_CFG.init_state.replace(
+        init_state=UR10e_HANDE_GRIPPER_CFG.init_state.replace(
             joint_pos={
+                # UR10e arm joints
                 "shoulder_pan_joint": 0.0,
-                "shoulder_lift_joint": -1.5707963267948966,
-                "elbow_joint": -1.5707963267948966,
+                "shoulder_lift_joint": 0.0,
+                "elbow_joint": 0.0,
                 "wrist_1_joint": 0.0,
-                "wrist_2_joint": 1.5707963267948966,
+                "wrist_2_joint": 0.0,
                 "wrist_3_joint": 0.0,
+                # HandE gripper joints
+                "robotiq_hande_left_finger_joint": 0.0,
+                "robotiq_hande_right_finger_joint": 0.0,
             },
             pos=(0.0, 0.0, 0.0),
             rot=(1.0, 0.0, 0.0, 0.0),
@@ -87,20 +101,10 @@ def run_validation(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     
     robot = scene["robot"]
     sim_dt = sim.get_physics_dt()
-    analytical_fk = UR10eKinematics()
     
     # Convert commanded joints to tensor
     commanded_joints = torch.tensor([args_cli.joints], device=sim.device)
     commanded_joints = commanded_joints.repeat(scene.num_envs, 1)
-
-    # Compute expected end-effector pose using analytical FK using commanded joints
-    joints_np = commanded_joints[0].cpu().numpy()
-    expected_ee_pos, expected_ee_rot = analytical_fk.get_ee_pose(joints_np)
-    expected_ee_euler = analytical_fk.rotation_matrix_to_euler_xyz(expected_ee_rot)
-    
-    # Convert to tensors for comparison
-    expected_ee_pos_torch = torch.tensor(expected_ee_pos, device=sim.device).unsqueeze(0)
-    expected_ee_euler_torch = torch.tensor(expected_ee_euler, device=sim.device).unsqueeze(0)
     
     
     print(f"\n{'='*60}")
@@ -118,7 +122,15 @@ def run_validation(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     
     # Step 1: Send joint position commands
     print("Sending joint position commands...")
-    robot.set_joint_position_target(commanded_joints)
+    # Handle robots with more than 6 joints (e.g., gripper) by padding with zeros
+    num_robot_joints = robot.num_joints
+    if num_robot_joints > 6:
+        extra_joints = torch.zeros((commanded_joints.shape[0], num_robot_joints - 6), device=sim.device)
+        commanded_joints_full = torch.cat([commanded_joints, extra_joints], dim=1)
+    else:
+        commanded_joints_full = commanded_joints
+
+    robot.set_joint_position_target(commanded_joints_full)
     robot.write_data_to_sim()
     
     # Step 2: Wait until settled (with progress monitoring)
@@ -138,28 +150,46 @@ def run_validation(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     # Step 3: Measure actual joint positions
     actual_joints = robot.data.joint_pos[:, :6].clone()
     
-    # Step 4: Get actual end-effector position
+    # Step 4: Get actual end-effector position from Isaac Sim
     ee_body_idx = robot.find_bodies("wrist_3_link")[0][0]
     ee_pose_w = robot.data.body_pose_w[:, ee_body_idx, :]
     actual_ee_position = ee_pose_w[:, 0:3]  # xyz position
     actual_ee_quat_sim = ee_pose_w[:, 3:7]  # quaternion
-    actual_ee_euler_sim = euler_xyz_from_quat(actual_ee_quat_sim)
-    actual_ee_euler_sim = torch.stack(actual_ee_euler_sim, dim=1)  # stacks as columns [num_envs, 3]
-    
 
-    # Step 5: Calculate errors
-    joint_errors = actual_joints - commanded_joints
-    joint_errors_deg = torch.rad2deg(joint_errors)
+    # Step 5: Compute expected pose using analytical FK
+    joints_np = commanded_joints[0].cpu().numpy()
+    params = model_params()
+    T_EE, T_flange = model_forwardk(joints_np, params, use_calibration=False)
     
-    # Position error: Isaac Sim vs Analytical FK
+    # Transform from analytical model frame to Isaac Sim base frame
+    T_EE = ISAAC_TO_ANALYTICAL_BASE_TRANSFORM @ T_EE
+    
+    expected_ee_pos = T_EE[0:3, 3]
+    R_analytical = T_EE[0:3, 0:3]
+
+    # Convert to tensors for comparison
+    expected_ee_pos_torch = torch.tensor(expected_ee_pos, device=sim.device).unsqueeze(0)
+
+    # Step 6: Calculate position error
     position_error = actual_ee_position - expected_ee_pos_torch.repeat(scene.num_envs, 1)
     position_error_norm = torch.norm(position_error, dim=1)
     
-    # Orientation error: Isaac Sim vs Analytical FK
-    orientation_error = actual_ee_euler_sim - expected_ee_euler_torch.repeat(scene.num_envs, 1)
-    # Handle angle wrapping
-    orientation_error = torch.atan2(torch.sin(orientation_error), torch.cos(orientation_error))
-    orientation_error_norm = torch.norm(orientation_error, dim=1)
+    # Step 7: Calculate orientation error using rotation matrices
+    quat = actual_ee_quat_sim[0].cpu().numpy()
+    w, x, y, z = quat[0], quat[1], quat[2], quat[3]
+    R_sim = np.array([
+        [1-2*(y**2+z**2), 2*(x*y-w*z), 2*(x*z+w*y)],
+        [2*(x*y+w*z), 1-2*(x**2+z**2), 2*(y*z-w*x)],
+        [2*(x*z-w*y), 2*(y*z+w*x), 1-2*(x**2+y**2)]
+    ])
+
+    R_error = R_sim.T @ R_analytical
+    _, angle_error = rotm_to_axisangle(R_error)
+    orientation_error_deg = np.rad2deg(angle_error)
+
+    # Step 8: Calculate joint errors
+    joint_errors = actual_joints - commanded_joints
+    joint_errors_deg = torch.rad2deg(joint_errors)
     
     # Print results
     print(f"\n{'='*60}")
@@ -172,7 +202,6 @@ def run_validation(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     for env_idx in range(scene.num_envs):
         max_joint_err = torch.max(torch.abs(joint_errors_deg[env_idx])).item()
         pos_err_mm = position_error_norm[env_idx].item() * 1000
-        orient_err_deg = torch.rad2deg(orientation_error_norm[env_idx]).item()
         
         print(f"\nEnvironment {env_idx}:")
         print(f"  Commanded joints (deg): {torch.rad2deg(commanded_joints[env_idx]).cpu().numpy()}")
@@ -194,13 +223,10 @@ def run_validation(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         print(f"  Isaac Sim EE pos (mm):  {actual_ee_position[env_idx].cpu().numpy() * 1000}")
         print(f"  Analytical EE pos (mm): {expected_ee_pos * 1000}")
         print(f"  Position error (mm):    {pos_err_mm:.3f}")
-        
-        print(f"\n  Isaac Sim EE euler (deg):  {torch.rad2deg(actual_ee_euler_sim[env_idx]).cpu().numpy()}")
-        print(f"  Analytical EE euler (deg): {np.rad2deg(expected_ee_euler)}")
-        print(f"  Orientation error (deg):   {orient_err_deg:.3f}")
+        print(f"  Orientation error (deg): {orientation_error_deg:.3f}")
         
         # Check FK match
-        if pos_err_mm < 1.0 and orient_err_deg < 1.0:
+        if pos_err_mm < 1.0 and orientation_error_deg < 1.0:
             print(f"  FK Status: ✓ MATCH (Isaac Sim ≈ Analytical FK)")
             fk_match_count += 1
         else:
@@ -212,7 +238,7 @@ def run_validation(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     print(f"  FK validation:     {fk_match_count}/{scene.num_envs} environments match")
     print(f"{'='*60}")
     
-    # Step 6: Save to CSV
+    # Step 9: Save to CSV
     save_to_csv(commanded_joints, actual_joints, joint_errors, 
                 actual_ee_position, expected_ee_pos_torch, position_error)
     
