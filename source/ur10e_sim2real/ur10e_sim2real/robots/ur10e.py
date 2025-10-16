@@ -63,40 +63,45 @@ UR10e_HANDE_GRIPPER_CFG = ArticulationCfg(
     ),
     actuators={
         # UR10e arm actuators
+        # Sources:
+        # [1] https://www.universal-robots.com/articles/ur/robot-care-maintenance/max-joint-torques-cb3-and-e-series/
+        # [2] https://www.universal-robots.com/media/1807466/ur10e_e-series_datasheets_web.pdf
+        # [3] https://github.com/isaac-sim/IsaacLab/blob/main/source/isaaclab_assets/isaaclab_assets/robots/universal_robots.py
+        # [4] https://robotiq.com/products/adaptive-grippers#Hand-E
         "shoulder": ImplicitActuatorCfg(
             joint_names_expr=["shoulder_.*"],
-            effort_limit_sim=330.0,
-            velocity_limit_sim=2.0944,  # 120 deg/s
-            stiffness=1320.0,
-            damping=72.6636085,
+            effort_limit_sim=330.0, # Size 4: 330 Nm [1]
+            velocity_limit_sim=2.0944,  # 120 deg/s [2]
+            stiffness=1320.0, # [3]
+            damping=72.6636085, # [3]
             friction=0.0,
             armature=0.0,
         ),
         "elbow": ImplicitActuatorCfg(
             joint_names_expr=["elbow_joint"],
-            effort_limit_sim=150.0,
-            velocity_limit_sim=3.1416,  # 180 deg/s
-            stiffness=600.0,
-            damping=34.64101615,
+            effort_limit_sim=150.0, # Size 3: 150 Nm [1]
+            velocity_limit_sim=3.1416,  # 180 deg/s [2]
+            stiffness=600.0, # [3]
+            damping=34.64101615, # [3]
             friction=0.0,
             armature=0.0,
         ),
         "wrist": ImplicitActuatorCfg(
             joint_names_expr=["wrist_.*"],
-            effort_limit_sim=54.0,
-            velocity_limit_sim=3.1416,  # 180 deg/s
-            stiffness=216.0,
-            damping=29.39387691,
+            effort_limit_sim=54.0, # Size 2: 54 Nm [1]
+            velocity_limit_sim=3.1416,  # 180 deg/s [2]
+            stiffness=216.0, # [3]
+            damping=29.39387691, # [3]
             friction=0.0,
             armature=0.0,
         ),
         # HandE gripper actuators
         "gripper": ImplicitActuatorCfg(
             joint_names_expr=["robotiq_hande_.*_finger_joint"],
-            effort_limit_sim=130.0,
-            velocity_limit_sim=0.15,
-            stiffness=100.0, # TODO: verify values for HandE gripper
-            damping=10.0, # TODO: verify values for HandE gripper
+            effort_limit_sim=130.0, # 20–185 N per finger ​[4]
+            velocity_limit_sim=0.15, # 20-150 mm/s ​[4]
+            stiffness=100.0, # estimated value
+            damping=10.0, # estimated value
             friction=0.1,
             armature=0.0,
         ),
