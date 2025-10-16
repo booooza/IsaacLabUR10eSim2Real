@@ -21,10 +21,8 @@ from isaaclab.envs.mdp import (
 # Import custom observation functions 
 from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.mdp.observations import (
     distance_to_object,
-    ee_pose,
-    ee_velocity,
-    ee_to_object_vector,
-    object_to_target_vector,
+    relative_position_from_scene_entity,
+    relative_rotation_from_scene_entity,
 )
 
 
@@ -57,17 +55,52 @@ class PickPlaceObservationsCfg:
             # noise=GaussianNoise(mean=0.0, std=0.01),  # Gripper noise
         )
         
-        # Task-specific (with noise)
-        object_pose = ObservationTermCfg(
-            func=root_pos_w,
-            params={"asset_cfg": SceneEntityCfg("object")},
-            # noise=GaussianNoise(mean=0.0, std=0.01),  # Position noise
+        # End-effector state
+        tcp_position_base  = ObservationTermCfg(
+            func=relative_position_from_scene_entity,
+            params={"asset_cfg": SceneEntityCfg("ee_frame")},
+        )
+
+        tcp_rotation_base  = ObservationTermCfg(
+            func=relative_rotation_from_scene_entity,
+            params={"asset_cfg": SceneEntityCfg("ee_frame")},
+        )
+
+        # TCP rotation relative to object and target
+        tcp_to_object_rotation = ObservationTermCfg(
+            func=mdp.relative_rotation_from_scene_entity,
+            params={"asset_cfg": SceneEntityCfg("ee_object_frame")},
+            # noise=GaussianNoise(mean=0.0, std=0.01),  # Vision noise
+        )
+        tcp_to_target_rotation = ObservationTermCfg(
+            func=mdp.relative_rotation_from_scene_entity,
+            params={"asset_cfg": SceneEntityCfg("ee_target_frame")},
+            # noise=GaussianNoise(mean=0.0, std=0.01),  # Vision noise
+        )
+
+        # Task-specific object and target states
+        object_position_base  = ObservationTermCfg(
+            func=relative_position_from_scene_entity,
+            params={"asset_cfg": SceneEntityCfg("object_frame")},
+            # noise=GaussianNoise(mean=0.0, std=0.01),  # Vision noise
+        )
+
+        object_rotation_base  = ObservationTermCfg(
+            func=relative_rotation_from_scene_entity,
+            params={"asset_cfg": SceneEntityCfg("object_frame")},
+            # noise=GaussianNoise(mean=0.0, std=0.01),  # Vision noise
         )
         
-        target_pose = ObservationTermCfg(
-            func=root_pos_w, 
-            params={"asset_cfg": SceneEntityCfg("target")},
-            # noise=GaussianNoise(mean=0.0, std=0.01),
+        target_position_base  = ObservationTermCfg(
+            func=relative_position_from_scene_entity,
+            params={"asset_cfg": SceneEntityCfg("target_frame")},
+            # noise=GaussianNoise(mean=0.0, std=0.01),  # Vision noise
+        )
+
+        target_rotation_base  = ObservationTermCfg(
+            func=relative_rotation_from_scene_entity,
+            params={"asset_cfg": SceneEntityCfg("target_frame")},
+            # noise=GaussianNoise(mean=0.0, std=0.01),  # Vision noise
         )
         
         # Previous actions
@@ -95,39 +128,7 @@ class PickPlaceObservationsCfg:
             func=joint_vel_rel,
             params={"asset_cfg": SceneEntityCfg("robot", joint_names=["shoulder_.*", "elbow_.*", "wrist_.*"])},
         )
-        
-        # End-effector state
-        ee_pose = ObservationTermCfg(
-            func=ee_pose,
-            params={"ee_frame_cfg": SceneEntityCfg("ee_frame")},
-        )
-        
-        ee_vel = ObservationTermCfg(
-            func=ee_velocity,
-            params={"ee_frame_cfg": SceneEntityCfg("ee_frame")},
-        )
-        
-        object_vel = ObservationTermCfg(
-            func=root_lin_vel_w,
-            params={"asset_cfg": SceneEntityCfg("object")},
-        )
-        
-        # Relative transforms
-        ee_to_object = ObservationTermCfg(
-            func=ee_to_object_vector,
-            params={
-                "object_cfg": SceneEntityCfg("object"),
-                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
-            }
-        )
-        
-        object_to_target = ObservationTermCfg(
-            func=object_to_target_vector,
-            params={
-                "object_cfg": SceneEntityCfg("object"),
-                "target_cfg": SceneEntityCfg("target"),
-            }
-        )        
+    
         
         def __post_init__(self):
             self.enable_corruption = False

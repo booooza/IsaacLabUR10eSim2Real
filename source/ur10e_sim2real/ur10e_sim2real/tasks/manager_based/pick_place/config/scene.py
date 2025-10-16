@@ -63,23 +63,23 @@ class PickPlaceSceneCfg(InteractiveSceneCfg):
         )
     )
 
-    # Object to manipulate
+    # Object to manipulate - randomized cubes
     object = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Object",
-        spawn=sim_utils.UsdFileCfg(
-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/YCB/Axis_Aligned_Physics/005_tomato_soup_can.usd",
+        spawn=sim_utils.CuboidCfg(
+            size=(0.03, 0.03, 0.06),  # Will be randomized per env
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 solver_position_iteration_count=16,
                 solver_velocity_iteration_count=1,
                 max_depenetration_velocity=5.0,
                 disable_gravity=False,
             ),
-            collision_props=sim_utils.CollisionPropertiesCfg(
-                collision_enabled=True,
-            ),
+            mass_props=sim_utils.MassPropertiesCfg(mass=0.1),  # Will be randomized
+            collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.8, 0.2, 0.2)),
         ),
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(-0.25, -0.45, 0.00), 
+            pos=(-0.25, -0.45, 0.00),
             rot=(1, 0, 0, 0)
         ),
     )
@@ -91,7 +91,7 @@ class PickPlaceSceneCfg(InteractiveSceneCfg):
         spawn=sim_utils.CuboidCfg(
             size=(0.01, 0.01, 0.01),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                kinematic_enabled=True,
+                kinematic_enabled=False,
                 disable_gravity=True,
             ),
             collision_props=sim_utils.CollisionPropertiesCfg(
@@ -110,17 +110,58 @@ class PickPlaceSceneCfg(InteractiveSceneCfg):
         ),
     )
 
-    
+    # Object frame tracker - tracking the object position wrt robot base
+    object_frame = FrameTransformerCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/base_link",
+        target_frames=[
+            FrameTransformerCfg.FrameCfg(
+                prim_path="{ENV_REGEX_NS}/Object",
+                name="object",
+            ),
+        ],
+        debug_vis=False,  # Set to True to visualize
+        visualizer_cfg=FRAME_MARKER_CFG.replace(
+            prim_path="/Visuals/FrameTransformer",
+            markers={
+                "frame": sim_utils.UsdFileCfg(
+                    usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/UIElements/frame_prim.usd",
+                    scale=(0.05, 0.05, 0.05),
+                ),
+            }
+        ),
+    )
+
+    # Target frame tracker - tracking the target position wrt robot base
+    target_frame = FrameTransformerCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/base_link",
+        target_frames=[
+            FrameTransformerCfg.FrameCfg(
+                prim_path="{ENV_REGEX_NS}/Target",
+                name="target",
+            ),
+        ],
+        debug_vis=False,  # Set to True to visualize
+        visualizer_cfg=FRAME_MARKER_CFG.replace(
+            prim_path="/Visuals/FrameTransformer",
+            markers={
+                "frame": sim_utils.UsdFileCfg(
+                    usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/UIElements/frame_prim.usd",
+                    scale=(0.05, 0.05, 0.05),
+                ),
+            }
+        ),
+    )
+
     # End-effector frame tracker - tracking actual TCP of Robotiq gripper
     ee_frame = FrameTransformerCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/base_link",  # base_link is a rigid body
+        prim_path="{ENV_REGEX_NS}/Robot/base_link",
         debug_vis=True,
         visualizer_cfg=FRAME_MARKER_CFG.replace(
             prim_path="/Visuals/FrameTransformer",
             markers={
                 "frame": sim_utils.UsdFileCfg(
                     usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/UIElements/frame_prim.usd",
-                    scale=(0.1, 0.1, 0.1),
+                    scale=(0.05, 0.05, 0.05),
                 ),
             }
         ),
@@ -130,6 +171,48 @@ class PickPlaceSceneCfg(InteractiveSceneCfg):
                 name="end_effector",
             ),
         ],
+    )
+
+    # TCP relative to object
+    ee_object_frame = FrameTransformerCfg(
+        prim_path="{ENV_REGEX_NS}/Object",  # SOURCE = object
+        target_frames=[
+            FrameTransformerCfg.FrameCfg(
+                prim_path="{ENV_REGEX_NS}/Robot/robotiq_hande_end",
+                name="ee_to_object",
+            ),
+        ],
+        debug_vis=False,
+        visualizer_cfg=FRAME_MARKER_CFG.replace(
+            prim_path="/Visuals/FrameTransformer",
+            markers={
+                "frame": sim_utils.UsdFileCfg(
+                    usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/UIElements/frame_prim.usd",
+                    scale=(0.05, 0.05, 0.05),
+                ),
+            }
+        ),
+    )
+
+    # TCP relative to target
+    ee_target_frame = FrameTransformerCfg(
+        prim_path="{ENV_REGEX_NS}/Target",  # SOURCE = target
+        target_frames=[
+            FrameTransformerCfg.FrameCfg(
+                prim_path="{ENV_REGEX_NS}/Robot/robotiq_hande_end",
+                name="ee_to_target",
+            ),
+        ],
+        debug_vis=False,
+        visualizer_cfg=FRAME_MARKER_CFG.replace(
+            prim_path="/Visuals/FrameTransformer",
+            markers={
+                "frame": sim_utils.UsdFileCfg(
+                    usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/UIElements/frame_prim.usd",
+                    scale=(0.05, 0.05, 0.05),
+                ),
+            }
+        ),
     )
     
     # Lighting

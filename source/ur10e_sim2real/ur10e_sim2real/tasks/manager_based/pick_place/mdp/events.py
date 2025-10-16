@@ -87,6 +87,9 @@ def reset_target_pose(
     # Combine and write
     poses = torch.cat([positions, orientations], dim=-1)
     target_entity.write_root_pose_to_sim(poses, env_ids=env_ids)
+    
+    velocities = torch.zeros((num_resets, 6), device=env.device)
+    target_entity.write_root_velocity_to_sim(velocities, env_ids=env_ids)
 
 def reset_articulation_to_default(
     env: ManagerBasedRLEnv,
