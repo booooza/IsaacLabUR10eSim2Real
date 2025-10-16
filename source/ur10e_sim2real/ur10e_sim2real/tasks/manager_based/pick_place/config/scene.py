@@ -67,7 +67,7 @@ class PickPlaceSceneCfg(InteractiveSceneCfg):
     object = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Object",
         spawn=sim_utils.CuboidCfg(
-            size=(0.03, 0.03, 0.06),  # Will be randomized per env
+            size=(0.025, 0.025, 0.025),  # Base size: 2.5cm cube, will be randomized per env
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 solver_position_iteration_count=16,
                 solver_velocity_iteration_count=1,
@@ -79,7 +79,7 @@ class PickPlaceSceneCfg(InteractiveSceneCfg):
             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.8, 0.2, 0.2)),
         ),
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(-0.25, -0.45, 0.00),
+            pos=(0.0, -0.45, 0.0), # Center of the workspace
             rot=(1, 0, 0, 0)
         ),
     )
@@ -105,7 +105,7 @@ class PickPlaceSceneCfg(InteractiveSceneCfg):
             ),
         ),
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(0.25, -0.45, 0),
+            pos=(0.0, -0.45, 0.0),  # Center of the workspace
             rot=(1.0, 0.0, 0.0, 0.0)
         ),
     )

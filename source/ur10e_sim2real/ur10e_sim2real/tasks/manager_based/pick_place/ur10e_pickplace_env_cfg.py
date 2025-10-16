@@ -53,7 +53,7 @@ class PickPlaceEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for pick-and-place environment."""
     
     # Scene
-    scene: PickPlaceSceneCfg = PickPlaceSceneCfg(num_envs=512, env_spacing=2.5)
+    scene: PickPlaceSceneCfg = PickPlaceSceneCfg(num_envs=512, env_spacing=2.5, replicate_physics=False) # check if replicate_physics can be True
     
     # MDP components
     actions: PickPlaceActionsCfg = PickPlaceActionsCfg()
