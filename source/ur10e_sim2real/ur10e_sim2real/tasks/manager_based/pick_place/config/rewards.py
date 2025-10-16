@@ -17,21 +17,32 @@ class ReachStageRewardsCfg:
         params={
             "object_cfg": SceneEntityCfg("object"),
             "ee_frame_cfg": SceneEntityCfg("ee_frame"),
-            "tolerance": 0.02,
+            "tolerance": 0.01,
+            "hover_height": 0.05,
         },
     )
     
-    # Progress incentive
-    progress_reward = RewardTermCfg(
-        func=reaching_progress_reward,
-        weight=1.0,
+    reach_success = RewardTermCfg(
+        func=reach_success,
+        weight=5.0,
         params={
+            "threshold": 0.10,
             "object_cfg": SceneEntityCfg("object"),
             "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+            "hover_height": 0.05,
         },
     )
     
     # Regularization
+    collision_penalty = RewardTermCfg(
+        func=object_collision_penalty,
+        weight=1.0,
+        params={
+            "velocity_threshold": 0.3,
+            "object_cfg": SceneEntityCfg("object"),
+        },
+    )
+    
     action_rate_penalty = RewardTermCfg(
         func=mdp.action_rate_l2,
         weight=-0.01,
@@ -49,22 +60,24 @@ class PickPlaceRewardsCfg:
     
     # Stage 1: Reaching rewards
     distance_ee_to_object = RewardTermCfg(
-        func=distance_reward_ee_to_object,
+        func=shaped_distance_reward,
         weight=2.0,
         params={
-            "std": 0.1,
             "object_cfg": SceneEntityCfg("object"),
             "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+            "tolerance": 0.01,
+            "hover_height": 0.05,
         },
     )
     
     reach_success = RewardTermCfg(
         func=mdp.reach_success,
-        weight=0.0,  # Zero weight - only for tracking
+        weight=1.0,  # Zero weight - only for tracking
         params={
-            "threshold": 5.00,  # 5cm
             "object_cfg": SceneEntityCfg("object"),
             "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+            "threshold": 0.01,  # 1cm
+            "hover_height": 0.05,
         },
     )
 
@@ -78,8 +91,27 @@ class PickPlaceRewardsCfg:
             "ee_frame_cfg": SceneEntityCfg("ee_frame"),
         },
     )
+
+    pick_success = RewardTermCfg(
+        func=mdp.pick_success_reward,
+        weight=1.0,  # Zero weight - only for tracking
+        params={
+            "height_threshold": 0.15,  # 15 cm
+            "grasp_threshold": 0.05,  # 5 cm
+            "object_cfg": SceneEntityCfg("object"),
+            "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+        },
+    )
     
     # Penalties
+    orientation_penalty = RewardTermCfg(
+        func=mdp.ee_orientation_penalty,
+        weight=1.0,
+        params={
+            "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+        },
+    )
+    
     action_rate_penalty = RewardTermCfg(
         func=mdp.action_rate_l2,
         weight=-0.001,

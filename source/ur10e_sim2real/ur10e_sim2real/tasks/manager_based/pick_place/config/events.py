@@ -24,9 +24,9 @@ class PickPlaceEventCfg:
         mode="reset",
         params={
             "object_cfg": SceneEntityCfg("object"),
-            "position_range_x": (-0.4, -0.6),
-            "position_range_y": (-0.2, 0.2),
-            "height": 0.05,
+            "position_range_x": (-0.25, 0.25), # in world frame: vertical workspace position
+            "position_range_y": (-0.2, -0.7), # in world frame: horizontal workspace position
+            "height": 0.00,
         },
     )
     
@@ -36,9 +36,9 @@ class PickPlaceEventCfg:
         mode="reset",
         params={
             "target_cfg": SceneEntityCfg("target"),
-            "position_range_x": (-0.5, -0.7),
-            "position_range_y": (-0.2, 0.2),
-            "height": 0.02,
+            "position_range_x": (-0.25, 0.25), # in world frame: vertical workspace position
+            "position_range_y": (-0.2, -0.7), # in world frame: horizontal workspace position
+            "height": 0.00,
             "min_distance_from_object": 0.15,
         },
     )

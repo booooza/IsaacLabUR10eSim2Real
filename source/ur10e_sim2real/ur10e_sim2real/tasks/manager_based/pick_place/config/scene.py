@@ -28,21 +28,39 @@ class PickPlaceSceneCfg(InteractiveSceneCfg):
         init_state=AssetBaseCfg.InitialStateCfg(pos=(0.0, 0.0, -0.793)),  # Lowered to align with table surface
     )
     
-    # Table
+    # Table - Thorlabs table around 0.79m high, 0.9m long and 0.6m wide
+    # Assuming the robot base is at (0, 0, 0), the table is centered at (0.05, 0, 0)
+    # for a workspace of 50 x 50 cm in front of the robot with an offset of 20 cm 
+    # from the center of the robot base
     table = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/Table",
         spawn=sim_utils.UsdFileCfg(
             usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Mounts/ThorlabsTable/table_instanceable.usd",
         ),
         init_state=AssetBaseCfg.InitialStateCfg(
-            pos=(-0.05, 0.0, 0.0), 
-            rot=(0, 0, 0, 1)
+            pos=(0.0, -0.05, 0.0), 
+            rot=(0.7071068, 0.0, 0.0, -0.7071068),  # -90° around Z-axis
         ),
     )
 
     # Robot - UR10e with Hand-E gripper
     robot: ArticulationCfg = UR10e_HANDE_GRIPPER_CFG.replace(
         prim_path="{ENV_REGEX_NS}/Robot",
+        init_state=UR10e_HANDE_GRIPPER_CFG.init_state.replace(
+            joint_pos={
+                # UR10e arm joints
+                "shoulder_pan_joint": 0.0,
+                "shoulder_lift_joint": -1.5707963267948966, # -90 degrees
+                "elbow_joint": 1.5707963267948966, # 90 degrees
+                "wrist_1_joint": -1.5707963267948966, # -90 degrees
+                "wrist_2_joint": -1.5707963267948966, # -90 degrees
+                "wrist_3_joint": 0.0,
+                # HandE gripper joints (open position)
+                "robotiq_hande_left_finger_joint": 0.025,
+                "robotiq_hande_right_finger_joint": 0.025,
+            },
+            rot=(0.7071068, 0.0, 0.0, -0.7071068),  # -90° around Z-axis
+        )
     )
 
     # Object to manipulate
@@ -61,16 +79,17 @@ class PickPlaceSceneCfg(InteractiveSceneCfg):
             ),
         ),
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(-0.5, 0.0, 0.05), 
+            pos=(-0.25, -0.45, 0.00), 
             rot=(1, 0, 0, 0)
         ),
     )
 
     # Target location marker
+    # Consider adding a physical target object like a bin (e.g. Isaac/Props/KLT_Bin/small_KLT.usd)
     target = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Target",
         spawn=sim_utils.CuboidCfg(
-            size=(0.08, 0.08, 0.01),
+            size=(0.01, 0.01, 0.01),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 kinematic_enabled=True,
                 disable_gravity=True,
@@ -86,7 +105,7 @@ class PickPlaceSceneCfg(InteractiveSceneCfg):
             ),
         ),
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(-0.6, 0.0, 0),
+            pos=(0.25, -0.45, 0),
             rot=(1.0, 0.0, 0.0, 0.0)
         ),
     )

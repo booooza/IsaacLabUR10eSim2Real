@@ -255,12 +255,33 @@ def object_dropped_penalty(
     
     return -dropped
 
+def object_collision_penalty(
+    env: "ManagerBasedRLEnv",
+    velocity_threshold: float = 0.3,
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+) -> torch.Tensor:
+    """Penalty when object moves too fast (indicates robot hit it)."""
+    object = env.scene[object_cfg.name]
+    
+    # Object velocity
+    object_vel = object.data.root_lin_vel_w
+    velocity_magnitude = torch.norm(object_vel, dim=1)
+    
+    # Penalize high velocities (robot crashed into it)
+    penalty = torch.where(
+        velocity_magnitude > velocity_threshold,
+        -torch.ones_like(velocity_magnitude) * 2.0,  # -2.0 penalty
+        torch.zeros_like(velocity_magnitude)
+    )
+    
+    return penalty
+
 def shaped_distance_reward(
     env: "ManagerBasedRLEnv",
     object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
     ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
-    reward_scale: float = 2.0,
-    tolerance: float = 0.02,  # 2cm tolerance
+    tolerance: float = 0.01,  # 1cm tolerance
+    hover_height: float = 0.05, # 5cm above object
 ) -> torch.Tensor:
     """Multi-stage distance reward with better shaping.
     
@@ -272,7 +293,11 @@ def shaped_distance_reward(
     object_pos = object_entity.data.root_pos_w[:, :3]
     ee_pos = ee_frame.data.target_pos_w[..., 0, :3]
     
-    distance = torch.norm(object_pos - ee_pos, p=2, dim=-1)
+    # Compute hover target (above object)
+    hover_target = object_pos.clone()
+    hover_target[:, 2] += hover_height
+
+    distance = torch.norm(hover_target - ee_pos, p=2, dim=-1)
     
     # Multi-stage reward function
     # 1. Far away (>0.5m): Linear approach reward
@@ -298,8 +323,7 @@ def shaped_distance_reward(
     # Bonus for being within tolerance
     success_bonus = (distance < tolerance).float() * 2.0
     
-    return (reward + success_bonus) * reward_scale
-
+    return reward + success_bonus
 
 def reaching_progress_reward(
     env: "ManagerBasedRLEnv",
@@ -331,38 +355,74 @@ def reaching_progress_reward(
     
     return reward
 
-
 def ee_orientation_penalty(
     env: "ManagerBasedRLEnv",
     ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
-    desired_orientation: list[float] = [1.0, 0.0, 0.0, 0.0],  # Identity quat
 ) -> torch.Tensor:
-    """Penalty for EE orientation deviation from desired.
-    
-    Encourages consistent approach angle.
-    """
-    from isaaclab.utils.math import quat_error_magnitude
+    """Penalty when gripper Z-axis (along fingers) doesn't point downward."""
+    from isaaclab.utils.math import quat_apply
     
     ee_frame = env.scene[ee_frame_cfg.name]
     ee_quat = ee_frame.data.target_quat_w[..., 0, :]
     
-    desired_quat = torch.tensor(desired_orientation, device=env.device).repeat(
-        env.num_envs, 1
+    # Get Z-axis direction (along fingers) in world frame
+    z_local = torch.tensor([0.0, 0.0, 1.0], device=env.device).repeat(env.num_envs, 1)
+    z_world = quat_apply(ee_quat, z_local)
+    
+    # Desired: Z pointing down (world -Z direction)
+    down = torch.tensor([0.0, 0.0, -1.0], device=env.device).repeat(env.num_envs, 1)
+    
+    # Alignment: 1.0 = perfect downward, -1.0 = pointing up
+    alignment = torch.sum(z_world * down, dim=-1)
+    
+    # Convert to penalty: 0 at perfect, -1 at worst
+    penalty = (alignment - 1.0) * 0.5  # Maps [1, -1] → [0, -1]
+    
+    return penalty
+
+def ee_orientation_penalty_object_aligned(
+    env: "ManagerBasedRLEnv",
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+) -> torch.Tensor:
+    """Penalty for EE not aligning with object orientation for top-down grasp.
+    
+    Computes desired EE orientation based on object's current orientation,
+    then penalizes deviation.
+    """
+    from isaaclab.utils.math import quat_error_magnitude, quat_mul, quat_from_euler_xyz
+    
+    ee_frame = env.scene[ee_frame_cfg.name]
+    object_entity = env.scene[object_cfg.name]
+    
+    ee_quat = ee_frame.data.target_quat_w[..., 0, :]
+    object_quat = object_entity.data.root_quat_w
+    
+    # Create a "top-down approach" offset (rotate 180° around X to point down)
+    num_envs = env.num_envs
+    approach_offset = quat_from_euler_xyz(
+        torch.full((num_envs,), 3.14159, device=env.device),  # 180° roll
+        torch.zeros(num_envs, device=env.device),
+        torch.zeros(num_envs, device=env.device),
     )
     
-    # Angular error
+    # Desired orientation: object orientation with top-down approach
+    desired_quat = quat_mul(object_quat, approach_offset)
+    
+    # Compute angular error
     error = quat_error_magnitude(ee_quat, desired_quat)
     
-    # Convert to penalty (0 at perfect alignment, -1 at 180° error)
+    # Convert to penalty
     penalty = -error / 3.14159
     
     return penalty
 
 def reach_success(
     env: "ManagerBasedRLEnv",
-    threshold: float = 0.02,  # 2cm tolerance
     object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
     ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+    threshold: float = 0.01,  # 1cm tolerance
+    hover_height: float = 0.05
 ) -> torch.Tensor:
     """Binary success indicator for reaching task.
     
@@ -371,6 +431,7 @@ def reach_success(
         threshold: Distance threshold for success (meters).
         object_cfg: Configuration for the object entity.
         ee_frame_cfg: Configuration for the end-effector frame.
+        hover_height: Height above object to reach.
     
     Returns:
         Success tensor shaped (num_envs,) with 1.0 for success, 0.0 for failure.
@@ -381,7 +442,12 @@ def reach_success(
     object_pos = object_entity.data.root_pos_w[:, :3]
     ee_pos = ee_frame.data.target_pos_w[..., 0, :3]
     
-    distance = torch.norm(object_pos - ee_pos, p=2, dim=-1)
+    # Compute hover target
+    hover_target = object_pos.clone()
+    hover_target[:, 2] += hover_height
+    
+    # Distance to hover target
+    distance = torch.norm(hover_target - ee_pos, p=2, dim=-1)
     success = (distance < threshold).float()
 
     env.extras['reach_success'] = success.cpu().numpy()  # Store for logging

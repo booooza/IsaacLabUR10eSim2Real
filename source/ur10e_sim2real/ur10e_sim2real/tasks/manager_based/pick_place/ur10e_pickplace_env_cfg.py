@@ -56,7 +56,7 @@ class PickPlaceEnvCfg(ManagerBasedRLEnvCfg):
     scene: PickPlaceSceneCfg = PickPlaceSceneCfg(num_envs=512, env_spacing=2.5)
     
     # MDP components
-    actions: ReachStageActionsCfg = ReachStageActionsCfg()
+    actions: PickPlaceActionsCfg = PickPlaceActionsCfg()
     observations: PickPlaceObservationsCfg = PickPlaceObservationsCfg()
     events: PickPlaceEventCfg = PickPlaceEventCfg()
     rewards: PickPlaceRewardsCfg = PickPlaceRewardsCfg()
@@ -65,7 +65,7 @@ class PickPlaceEnvCfg(ManagerBasedRLEnvCfg):
     
     # No commands needed (using events for goal setting)
     commands = None
-    
+
     def __post_init__(self):
         """Post initialization."""
         # General settings
