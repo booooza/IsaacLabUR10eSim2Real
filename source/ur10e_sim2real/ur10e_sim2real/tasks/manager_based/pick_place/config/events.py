@@ -7,39 +7,51 @@ from isaaclab.managers import SceneEntityCfg
 # Import reset functions from MDP module
 from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place import mdp
 
+OBJECT_POSE_RANGE = {
+    "x": (-0.25, 0.25),      # 0.0 ± 0.25 = [-0.25, 0.25]
+    "y": (0.25, -0.25),      # -0.45 ± 0.25 = [-0.7, -0.2]
+    "z": (0.0, 0.0), 
+    "roll": (0.0, 0.0),
+    "pitch": (0.0, 0.0),
+    "yaw": (-3.14, 3.14),
+}
+
+OBJECT_VELOCITY_RANGE = {
+    "x": (0.0, 0.0),
+    "y": (0.0, 0.0),
+    "z": (0.0, 0.0),
+    "roll": (0.0, 0.0),
+    "pitch": (0.0, 0.0),
+    "yaw": (0.0, 0.0),
+}
 
 @configclass
 class PickPlaceEventCfg:
     """Event configuration for resets and randomization."""
     
-    # Reset robot to home position
-    reset_articulation_to_default = EventTermCfg(
-        func=mdp.reset_articulation_to_default,
-        mode="reset",
+    reset_object_on_success = EventTermCfg(
+        func=mdp.reset_object_on_success,
+        mode="interval",
+        interval_range_s=(0, 0), # Check every step
+        params={
+            "object_cfg": SceneEntityCfg("object"),
+            "source_frame_cfg": SceneEntityCfg("ee_frame"),
+            "target_frame_cfg": SceneEntityCfg("hover_target_frame"),
+            "position_threshold": 0.1,
+            "rotation_threshold": 0.1,
+            "pose_range": OBJECT_POSE_RANGE,
+            "velocity_range": OBJECT_VELOCITY_RANGE,
+        },
     )
-
+    
     # Reset object and target poses
     reset_object = EventTermCfg(
         func=mdp.reset_root_state_uniform,
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("object"),
-            "pose_range": {
-                "x": (-0.25, 0.25),      # 0.0 ± 0.25 = [-0.25, 0.25]
-                "y": (0.25, -0.25),      # -0.45 ± 0.25 = [-0.7, -0.2]
-                "z": (0.0, 0.0), 
-                "roll": (0.0, 0.0),
-                "pitch": (0.0, 0.0),
-                "yaw": (-3.14, 3.14),
-            },
-            "velocity_range": {
-                "x": (0.0, 0.0),
-                "y": (0.0, 0.0),
-                "z": (0.0, 0.0),
-                "roll": (0.0, 0.0),
-                "pitch": (0.0, 0.0),
-                "yaw": (0.0, 0.0),
-            },
+            "pose_range": OBJECT_POSE_RANGE,
+            "velocity_range": OBJECT_VELOCITY_RANGE,
         },
     )
 
@@ -65,6 +77,12 @@ class PickPlaceEventCfg:
                 "yaw": (0.0, 0.0),
             },
         },
+    )
+
+    # Reset robot to home position
+    reset_articulation_to_default = EventTermCfg(
+        func=mdp.reset_articulation_to_default,
+        mode="reset",
     )
 
     randomize_object_mass = EventTermCfg(
@@ -109,6 +127,33 @@ class PickPlaceEventCfg:
             "event_name": "rep_cube_randomize_color",
         },
     )
+
+    # Randomize robot joint stiffness and damping
+    robot_joint_stiffness_and_damping = EventTermCfg(
+        func=mdp.randomize_actuator_gains,
+        min_step_count_between_reset=200,
+        mode="reset",
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "stiffness_distribution_params": (0.9, 1.1),
+            "damping_distribution_params": (0.75, 1.5),
+            "operation": "scale",
+            "distribution": "uniform",
+        },
+    )
+
+    # Randomize robot joint friction
+    # joint_friction = EventTermCfg(
+    #     func=mdp.randomize_joint_parameters,
+    #     min_step_count_between_reset=200,
+    #     mode="reset",
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot"),
+    #         "friction_distribution_params": (0.0, 0.1),
+    #         "operation": "add",
+    #         "distribution": "uniform",
+    #     },
+    # )
 
     # Custom logging
     log_custom_metrics = EventTermCfg(

@@ -4,6 +4,36 @@ from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import sample_uniform
 from isaaclab.utils.math import sample_uniform, quat_from_euler_xyz
+from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.mdp.rewards import reach_goal_bonus
+from isaaclab.envs.mdp import reset_root_state_uniform
+
+def reset_object_on_success(
+    env: ManagerBasedRLEnv,
+    env_ids: torch.Tensor,
+    object_cfg: SceneEntityCfg,
+    source_frame_cfg: SceneEntityCfg,
+    target_frame_cfg: SceneEntityCfg,
+    pose_range: dict,
+    velocity_range: dict,
+    position_threshold: float | None = 0.1,
+    rotation_threshold: float | None = 0.1,
+):
+    """Reset object when reach goal is achieved.
+    """    
+    # Check which envs succeeded
+    success = reach_goal_bonus(env, source_frame_cfg, target_frame_cfg, position_threshold, rotation_threshold)
+    success_env_ids = (success > 0.5).nonzero(as_tuple=False).squeeze(-1)
+    
+    env.extras['success'] = success.cpu().numpy()  # Store for logging
+
+    if len(success_env_ids) > 0:        
+        reset_root_state_uniform(
+            env,
+            success_env_ids,
+            pose_range=pose_range,
+            velocity_range=velocity_range,
+            asset_cfg=object_cfg,
+        )
 
 def reset_articulation_to_default(
     env: ManagerBasedRLEnv,
