@@ -214,6 +214,32 @@ class PickPlaceSceneCfg(InteractiveSceneCfg):
             }
         ),
     )
+
+    # Track hover point above object
+    hover_target_frame = FrameTransformerCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/base_link",
+        target_frames=[
+            FrameTransformerCfg.FrameCfg(
+                prim_path="{ENV_REGEX_NS}/Object",
+                name="hover_target",
+                offset=OffsetCfg(
+                    pos=(0.0, 0.0, 0.05),  # 5cm above object center
+                    rot=(0.0, 1.0, 0.0, 0.0),  # 180° around Y-axis -> Z points down
+                ),
+            ),
+        ],
+        debug_vis=True,  # Shows the grasp target
+        visualizer_cfg=FRAME_MARKER_CFG.replace(
+            prim_path="/Visuals/HoverTarget",
+            markers={
+                "frame": sim_utils.UsdFileCfg(
+                    usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/UIElements/frame_prim.usd",
+                    scale=(0.05, 0.05, 0.05),
+                ),
+            }
+        ),
+    )
+
     
     # Lighting
     light = AssetBaseCfg(
