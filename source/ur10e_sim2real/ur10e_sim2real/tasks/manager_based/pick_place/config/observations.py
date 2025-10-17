@@ -9,12 +9,9 @@ import torch
 
 # Import MDP functions from isaaclab
 from isaaclab.envs.mdp import (
-    joint_pos,
     joint_pos_rel,
     joint_pos_limit_normalized,
     joint_vel_rel,
-    root_pos_w,
-    root_lin_vel_w,
     last_action,
 )
 
@@ -66,54 +63,24 @@ class PickPlaceObservationsCfg:
             params={"asset_cfg": SceneEntityCfg("ee_frame")},
         )
 
-        # TCP rotation relative to object and target
-        tcp_to_object_rotation = ObservationTermCfg(
-            func=mdp.relative_rotation_from_scene_entity,
-            params={"asset_cfg": SceneEntityCfg("ee_object_frame")},
-            # noise=GaussianNoise(mean=0.0, std=0.01),  # Vision noise
-        )
-        tcp_to_target_rotation = ObservationTermCfg(
-            func=mdp.relative_rotation_from_scene_entity,
-            params={"asset_cfg": SceneEntityCfg("ee_target_frame")},
-            # noise=GaussianNoise(mean=0.0, std=0.01),  # Vision noise
-        )
-
-        # Task-specific object and target states
-        object_position_base  = ObservationTermCfg(
-            func=relative_position_from_scene_entity,
-            params={"asset_cfg": SceneEntityCfg("object_frame")},
-            # noise=GaussianNoise(mean=0.0, std=0.01),  # Vision noise
-        )
-
-        object_rotation_base  = ObservationTermCfg(
-            func=relative_rotation_from_scene_entity,
-            params={"asset_cfg": SceneEntityCfg("object_frame")},
-            # noise=GaussianNoise(mean=0.0, std=0.01),  # Vision noise
-        )
-        
+        # Target object state (assumption: perfectly known)
         target_position_base  = ObservationTermCfg(
             func=relative_position_from_scene_entity,
             params={"asset_cfg": SceneEntityCfg("target_frame")},
-            # noise=GaussianNoise(mean=0.0, std=0.01),  # Vision noise
         )
 
         target_rotation_base  = ObservationTermCfg(
             func=relative_rotation_from_scene_entity,
             params={"asset_cfg": SceneEntityCfg("target_frame")},
-            # noise=GaussianNoise(mean=0.0, std=0.01),  # Vision noise
         )
-        
+
+        tcp_to_target_rotation = ObservationTermCfg(
+            func=mdp.relative_rotation_from_scene_entity,
+            params={"asset_cfg": SceneEntityCfg("ee_target_frame")},
+        )
+
         # Previous actions
         prev_actions = ObservationTermCfg(func=last_action)
-        
-        # Distance to target
-        distance_to_object = ObservationTermCfg(
-            func=distance_to_object,
-            params={
-                "object_cfg": SceneEntityCfg("object"),
-                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
-            }
-        )
         
         def __post_init__(self):
             self.enable_corruption = True
@@ -128,7 +95,35 @@ class PickPlaceObservationsCfg:
             func=joint_vel_rel,
             params={"asset_cfg": SceneEntityCfg("robot", joint_names=["shoulder_.*", "elbow_.*", "wrist_.*"])},
         )
-    
+
+        # Task-specific object (ground-truth simulation state)
+        object_position_base  = ObservationTermCfg(
+            func=relative_position_from_scene_entity,
+            params={"asset_cfg": SceneEntityCfg("object_frame")},
+            # noise=GaussianNoise(mean=0.0, std=0.01),  # Vision noise
+        )
+
+        object_rotation_base  = ObservationTermCfg(
+            func=relative_rotation_from_scene_entity,
+            params={"asset_cfg": SceneEntityCfg("object_frame")},
+            # noise=GaussianNoise(mean=0.0, std=0.01),  # Vision noise
+        )
+
+        # Object Awareness: TCP rotation relative to object and target
+        tcp_to_object_rotation = ObservationTermCfg(
+            func=mdp.relative_rotation_from_scene_entity,
+            params={"asset_cfg": SceneEntityCfg("ee_object_frame")},
+            # noise=GaussianNoise(mean=0.0, std=0.01),  # Vision noise
+        )
+        
+        # Distance to target
+        distance_to_object = ObservationTermCfg(
+            func=distance_to_object,
+            params={
+                "object_cfg": SceneEntityCfg("object"),
+                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+            }
+        )
         
         def __post_init__(self):
             self.enable_corruption = False
