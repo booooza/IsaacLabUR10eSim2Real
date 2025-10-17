@@ -11,6 +11,7 @@ Currently implements Stage 1 (Reach) with asymmetric actor-critic observations.
 
 from dataclasses import MISSING
 from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.config.actions import ReachStageActionsCfg
+from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.config.rewards import ReachStageRewardsCfg
 import torch
 from typing import TYPE_CHECKING
 
@@ -59,7 +60,7 @@ class PickPlaceEnvCfg(ManagerBasedRLEnvCfg):
     actions: PickPlaceActionsCfg = PickPlaceActionsCfg()
     observations: PickPlaceObservationsCfg = PickPlaceObservationsCfg()
     events: PickPlaceEventCfg = PickPlaceEventCfg()
-    rewards: PickPlaceRewardsCfg = PickPlaceRewardsCfg()
+    rewards: ReachStageRewardsCfg = ReachStageRewardsCfg()
     terminations: PickPlaceTerminationsCfg = PickPlaceTerminationsCfg()
     curriculum: PickPlaceCurriculumCfg = PickPlaceCurriculumCfg()
     
