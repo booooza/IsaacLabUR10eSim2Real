@@ -8,7 +8,129 @@ from isaaclab.managers import SceneEntityCfg
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
+from isaaclab.utils.math import quat_mul, quat_conjugate
 
+def distance_l2(
+    env: "ManagerBasedRLEnv",
+    source_frame_cfg: SceneEntityCfg,
+    target_frame_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Euclidean distance between two frame transformers.
+    
+    Computes ||source_pos - target_pos||_2
+    
+    Args:
+        env: The environment instance.
+        source_frame_cfg: Configuration for the source frame (e.g., end-effector).
+        target_frame_cfg: Configuration for the target frame (e.g., hover target).
+    
+    Returns:
+        Distance tensor shaped (num_envs,).
+    """
+    source_frame = env.scene[source_frame_cfg.name]
+    target_frame = env.scene[target_frame_cfg.name]
+    
+    source_pos = source_frame.data.target_pos_w[..., 0, :3]
+    target_pos = target_frame.data.target_pos_w[..., 0, :3]
+    
+    distance = torch.norm(target_pos - source_pos, p=2, dim=-1)
+    
+    return distance
+
+
+def orientation_alignment_l2(
+    env: "ManagerBasedRLEnv",
+    source_frame_cfg: SceneEntityCfg,
+    target_frame_cfg: SceneEntityCfg,
+    rot_eps: float = 0.1,
+) -> torch.Tensor:
+    """Orientation alignment reward between two frame transformers.
+    
+    Computes: r_rot = 1 / (|rot_dist| + rot_eps)
+    where rot_dist = 2 * arcsin(min(||quat_diff[:,1:4]||_2, 1.0))
+    
+    This encourages the source frame to align with the target frame orientation.
+    
+    Args:
+        env: The environment instance.
+        source_frame_cfg: Configuration for the source frame (e.g., end-effector).
+        target_frame_cfg: Configuration for the target frame (e.g., hover target).
+        rot_eps: Small epsilon to avoid division by zero.
+    
+    Returns:
+        Reward tensor shaped (num_envs,).
+    """
+    source_frame = env.scene[source_frame_cfg.name]
+    target_frame = env.scene[target_frame_cfg.name]
+    
+    source_quat = source_frame.data.target_quat_w[..., 0, :]  # (N, 4) [w, x, y, z]
+    target_quat = target_frame.data.target_quat_w[..., 0, :]
+    
+    # Compute quaternion difference: q_diff = q_target * q_source^-1
+    quat_diff = quat_mul(target_quat, quat_conjugate(source_quat))
+    
+    # Rotation distance: rot_dist = 2 * arcsin(min(||quat_diff[:,1:4]||_2, 1.0))
+    # quat_diff is [w, x, y, z], so [:, 1:4] gives [x, y, z]
+    xyz_norm = torch.norm(quat_diff[:, 1:4], p=2, dim=-1)
+    xyz_norm_clamped = torch.clamp(xyz_norm, max=1.0)
+    rot_dist = 2.0 * torch.asin(xyz_norm_clamped)
+    
+    # Reward: r_rot = 1 / (|rot_dist| + rot_eps)
+    reward = 1.0 / (torch.abs(rot_dist) + rot_eps)
+    
+    return reward
+
+def reach_goal_bonus(
+    env: "ManagerBasedRLEnv",
+    source_frame_cfg: SceneEntityCfg,
+    target_frame_cfg: SceneEntityCfg,
+    position_threshold: float | None = 0.1,
+    rotation_threshold: float | None = 0.1,
+) -> torch.Tensor:
+    """Sparse bonus when source frame reaches target frame with correct pose.
+    
+    Returns 1.0 when both position and orientation are within thresholds.
+    
+    Args:
+        env: The environment instance.
+        source_frame_cfg: Configuration for the source frame (e.g., end-effector).
+        target_frame_cfg: Configuration for the target frame (e.g., hover target).
+        position_threshold: Distance threshold for success (meters). None to ignore position check.
+        rotation_threshold: Angular threshold for success (radians). None to ignore rotation check.
+    
+    Returns:
+        Binary success tensor shaped (num_envs,).
+    """
+    source_frame = env.scene[source_frame_cfg.name]
+    target_frame = env.scene[target_frame_cfg.name]
+    
+    # Start with all True
+    device = source_frame.data.target_pos_w.device
+    num_envs = source_frame.data.target_pos_w.shape[0]
+    success = torch.ones(num_envs, dtype=torch.bool, device=device)
+    
+    # Position check (if threshold provided)
+    if position_threshold is not None:
+        source_pos = source_frame.data.target_pos_w[..., 0, :3]
+        target_pos = target_frame.data.target_pos_w[..., 0, :3]
+        position_error = torch.norm(target_pos - source_pos, p=2, dim=-1)
+        success = success & (position_error < position_threshold)
+    
+    # Orientation check (if threshold provided)
+    if rotation_threshold is not None:
+        source_quat = source_frame.data.target_quat_w[..., 0, :]
+        target_quat = target_frame.data.target_quat_w[..., 0, :]
+        
+        quat_diff = quat_mul(target_quat, quat_conjugate(source_quat))
+        xyz_norm = torch.norm(quat_diff[:, 1:4], p=2, dim=-1)
+        xyz_norm_clamped = torch.clamp(xyz_norm, max=1.0)
+        rot_dist = 2.0 * torch.asin(xyz_norm_clamped)
+        
+        success = success & (rot_dist < rotation_threshold)
+    
+    return success.float()
+
+## Additional reward functions for pick-and-place task
 def distance_reward_ee_to_object(
     env: "ManagerBasedRLEnv",
     std: float = 0.1,
