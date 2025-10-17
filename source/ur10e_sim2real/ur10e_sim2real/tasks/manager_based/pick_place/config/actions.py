@@ -16,7 +16,7 @@ class ReachStageActionsCfg:
         asset_name="robot",
         joint_names=["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", 
                     "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"],
-        scale=1.0,  # Actions are in rad/s
+        scale=2.0,  # Maps [-1, 1] → [-2, 2] rad/s (joint velocity limits: ~2 rad/s)
     )
     
     # NO gripper action - will be frozen via events
