@@ -10,6 +10,9 @@ if TYPE_CHECKING:
 
 from isaaclab.utils.math import quat_mul, quat_conjugate
 
+POSITION_SUCCESS_THRESHOLD = 0.05 # 5 cm
+ROTATION_SUCCESS_THRESHOLD = 0.2 # ~11.5 degrees
+
 def distance_l2(
     env: "ManagerBasedRLEnv",
     source_frame_cfg: SceneEntityCfg,
@@ -84,8 +87,8 @@ def reach_goal_bonus(
     env: "ManagerBasedRLEnv",
     source_frame_cfg: SceneEntityCfg,
     target_frame_cfg: SceneEntityCfg,
-    position_threshold: float | None = 0.1,
-    rotation_threshold: float | None = 0.1,
+    position_threshold: float | None = POSITION_SUCCESS_THRESHOLD,
+    rotation_threshold: float | None = ROTATION_SUCCESS_THRESHOLD,
 ) -> torch.Tensor:
     """Sparse bonus when source frame reaches target frame with correct pose.
     

@@ -22,13 +22,13 @@ class PickPlaceTerminationsCfg:
         },
     )
 
-    # # Success termination - reaches hover target within position thresholds
+    # Success termination - reaches hover target within position thresholds
     # reach_success = DoneTerm(
     #     func=mdp.reach_termination,
     #     params={
     #         "source_frame_cfg": SceneEntityCfg("ee_frame"),
     #         "target_frame_cfg": SceneEntityCfg("hover_target_frame"),
     #         "position_threshold": 0.1,
-    #         "rotation_threshold": None,
+    #         "rotation_threshold": 0.1,
     #     },
     # )

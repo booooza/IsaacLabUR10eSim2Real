@@ -53,24 +53,15 @@ class ReachStageRewardsCfg:
 
     # Reach Bonus: Sparse reward when reaching target
     # successTolerance = 0.1
-    # reach_position_bonus = RewardTermCfg(
-    #     func=mdp.reach_goal_bonus,
-    #     weight=100.0,
-    #     params={
-    #         "source_frame_cfg": SceneEntityCfg("ee_frame"),
-    #         "target_frame_cfg": SceneEntityCfg("hover_target_frame"),
-    #         "position_threshold": 0.1,  # 10cm
-    #         "rotation_threshold": None,  # Ignore rotation
-    #     },
-    # )
+
     reach_pose_bonus = RewardTermCfg(
         func=mdp.reach_goal_bonus,
         weight=250.0,  # reach_goal_bonus = 250
         params={
             "source_frame_cfg": SceneEntityCfg("ee_frame"),
             "target_frame_cfg": SceneEntityCfg("hover_target_frame"),
-            "position_threshold": 0.1,  # 10cm
-            "rotation_threshold": 0.1,  # ~5.7 degrees
+            "position_threshold": POSITION_SUCCESS_THRESHOLD,
+            "rotation_threshold": ROTATION_SUCCESS_THRESHOLD,
         },
     )
 
