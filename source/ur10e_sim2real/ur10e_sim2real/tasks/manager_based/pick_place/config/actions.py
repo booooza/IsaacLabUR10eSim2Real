@@ -11,12 +11,12 @@ class ReachStageActionsCfg:
     """Actions for reach stage - gripper frozen open."""
     
     # Arm control only
-    joint_positions = JointPositionActionCfg(
+    # Velocity Control - Velocity commands
+    joint_velocities = JointVelocityActionCfg(
         asset_name="robot",
         joint_names=["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", 
                     "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"],
-        scale=0.5,
-        use_default_offset=True,
+        scale=1.0,  # Actions are in rad/s
     )
     
     # NO gripper action - will be frozen via events
