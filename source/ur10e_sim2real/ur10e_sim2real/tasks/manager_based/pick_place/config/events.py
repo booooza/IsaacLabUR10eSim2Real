@@ -6,6 +6,7 @@ from isaaclab.managers import SceneEntityCfg
 
 # Import reset functions from MDP module
 from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place import mdp
+from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.mdp.rewards import POSITION_SUCCESS_THRESHOLD, ROTATION_SUCCESS_THRESHOLD
 
 OBJECT_POSE_RANGE = {
     "x": (-0.25, 0.25),      # 0.0 ± 0.25 = [-0.25, 0.25]
@@ -26,6 +27,58 @@ OBJECT_VELOCITY_RANGE = {
 }
 
 @configclass
+class ReachStageEventCfg:
+    """Event configuration for resets and randomization."""
+    reset_object_on_success = EventTermCfg(
+        func=mdp.reset_object_on_success,
+        mode="interval",
+        interval_range_s=(0, 0), # Check every step
+        params={
+            "object_cfg": SceneEntityCfg("object"),
+            "source_frame_cfg": SceneEntityCfg("ee_frame"),
+            "target_frame_cfg": SceneEntityCfg("hover_target_frame"),
+            "position_threshold": POSITION_SUCCESS_THRESHOLD,
+            "rotation_threshold": ROTATION_SUCCESS_THRESHOLD,
+            "pose_range": OBJECT_POSE_RANGE,
+            "velocity_range": OBJECT_VELOCITY_RANGE,
+        },
+    )
+
+    update_success_metrics = EventTermCfg(
+        func=mdp.update_success_metrics,
+        mode="interval",
+        interval_range_s=(0, 0), # Check every step
+        params={
+            "source_frame_cfg": SceneEntityCfg("ee_frame"),
+            "target_frame_cfg": SceneEntityCfg("hover_target_frame"),
+            "position_threshold": POSITION_SUCCESS_THRESHOLD,
+            "rotation_threshold": ROTATION_SUCCESS_THRESHOLD,
+        },
+    )
+
+    reset_episodic_success_metrics = EventTermCfg(
+        func=mdp.reset_success_counters,
+        mode="reset",
+    )
+
+    # Reset object and target poses
+    reset_object = EventTermCfg(
+        func=mdp.reset_root_state_uniform,
+        mode="reset",
+        params={
+            "asset_cfg": SceneEntityCfg("object"),
+            "pose_range": OBJECT_POSE_RANGE,
+            "velocity_range": OBJECT_VELOCITY_RANGE,
+        },
+    )
+
+    # Reset robot to home position
+    reset_articulation_to_default = EventTermCfg(
+        func=mdp.reset_articulation_to_default,
+        mode="reset",
+    )
+
+@configclass
 class PickPlaceEventCfg:
     """Event configuration for resets and randomization."""
     
@@ -37,8 +90,8 @@ class PickPlaceEventCfg:
             "object_cfg": SceneEntityCfg("object"),
             "source_frame_cfg": SceneEntityCfg("ee_frame"),
             "target_frame_cfg": SceneEntityCfg("hover_target_frame"),
-            "position_threshold": 0.1,
-            "rotation_threshold": 0.1,
+            "position_threshold": POSITION_SUCCESS_THRESHOLD,
+            "rotation_threshold": ROTATION_SUCCESS_THRESHOLD,
             "pose_range": OBJECT_POSE_RANGE,
             "velocity_range": OBJECT_VELOCITY_RANGE,
         },

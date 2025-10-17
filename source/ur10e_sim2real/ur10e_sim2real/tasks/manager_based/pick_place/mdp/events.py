@@ -1,4 +1,4 @@
-from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.mdp.rewards import reach_success
+from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.mdp.rewards import POSITION_SUCCESS_THRESHOLD, ROTATION_SUCCESS_THRESHOLD, reach_success
 import torch
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.managers import SceneEntityCfg
@@ -15,8 +15,8 @@ def reset_object_on_success(
     target_frame_cfg: SceneEntityCfg,
     pose_range: dict,
     velocity_range: dict,
-    position_threshold: float | None = 0.1,
-    rotation_threshold: float | None = 0.1,
+    position_threshold: float | None = POSITION_SUCCESS_THRESHOLD,
+    rotation_threshold: float | None = ROTATION_SUCCESS_THRESHOLD,
 ):
     """Reset object when reach goal is achieved.
     """    
@@ -24,8 +24,6 @@ def reset_object_on_success(
     success = reach_goal_bonus(env, source_frame_cfg, target_frame_cfg, position_threshold, rotation_threshold)
     success_env_ids = (success > 0.5).nonzero(as_tuple=False).squeeze(-1)
     
-    env.extras['success'] = success.cpu().numpy()  # Store for logging
-
     if len(success_env_ids) > 0:        
         reset_root_state_uniform(
             env,
@@ -34,6 +32,77 @@ def reset_object_on_success(
             velocity_range=velocity_range,
             asset_cfg=object_cfg,
         )
+
+def update_success_metrics(
+    env: ManagerBasedRLEnv,
+    env_ids: torch.Tensor,
+    source_frame_cfg: SceneEntityCfg,
+    target_frame_cfg: SceneEntityCfg,
+    position_threshold: float = POSITION_SUCCESS_THRESHOLD,
+    rotation_threshold: float = ROTATION_SUCCESS_THRESHOLD,
+):
+    """Track metrics for non-terminating multi-success reaching task."""
+    combined_success = reach_goal_bonus(
+        env, source_frame_cfg, target_frame_cfg, 
+        position_threshold, rotation_threshold
+    )
+    success_mask = combined_success > 0.5
+    
+    # Initialize trackers once
+    if not hasattr(env, "_metrics"):
+        env._metrics = {
+            "episode_reward": torch.zeros(env.num_envs, device=env.device),
+            "consecutive_successes": torch.zeros(env.num_envs, dtype=torch.int, device=env.device),
+            "episode_successes": torch.zeros(env.num_envs, dtype=torch.int, device=env.device),
+            "total_successes": 0,
+            "last_episode_reward": 0.0,
+            "last_successes_per_episode": 0.0,
+        }
+    
+    metrics = env._metrics
+    
+    # Update metrics
+    metrics["episode_reward"] += env.reward_buf
+    metrics["consecutive_successes"] = torch.where(
+        success_mask,
+        metrics["consecutive_successes"] + 1,
+        torch.zeros_like(metrics["consecutive_successes"])
+    )
+    metrics["episode_successes"][success_mask] += 1
+    metrics["total_successes"] += success_mask.sum().item()
+    
+    # Log ALL metrics every step
+    if "log" not in env.extras:
+        env.extras["log"] = {}
+    
+    env.extras["log"]["episode_reward"] = metrics["last_episode_reward"]
+    env.extras["log"]["consecutive_successes"] = metrics["consecutive_successes"].float().mean().item()
+    env.extras["log"]["success_rate"] = success_mask.float().mean().item()
+    env.extras["log"]["total_successes"] = metrics["total_successes"]
+    env.extras["log"]["successes_per_episode"] = metrics["last_successes_per_episode"]
+
+
+def reset_success_counters(
+    env: ManagerBasedRLEnv,
+    env_ids: torch.Tensor,
+):
+    """Reset episode metrics on termination."""
+    if not hasattr(env, "_metrics"):
+        return
+    
+    if len(env_ids) == 0:
+        return
+    
+    metrics = env._metrics
+    
+    # Log completed episode stats
+    metrics["last_episode_reward"] = metrics["episode_reward"][env_ids].mean().item()
+    metrics["last_successes_per_episode"] = metrics["episode_successes"][env_ids].float().mean().item()
+    
+    # Reset counters for terminated envs
+    metrics["episode_reward"][env_ids] = 0.0
+    metrics["consecutive_successes"][env_ids] = 0
+    metrics["episode_successes"][env_ids] = 0
 
 def reset_articulation_to_default(
     env: ManagerBasedRLEnv,
