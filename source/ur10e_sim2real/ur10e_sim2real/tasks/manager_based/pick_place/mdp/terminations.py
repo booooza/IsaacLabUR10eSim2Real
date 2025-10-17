@@ -6,27 +6,30 @@ from isaaclab.managers import SceneEntityCfg
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
-def reach_success_termination(
+from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.mdp.rewards import reach_goal_bonus
+
+def reach_termination(
     env: "ManagerBasedRLEnv",
-    threshold: float = 0.02,
-    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
-    target_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
-    hover_height: float = 0.15,
+    source_frame_cfg: SceneEntityCfg,
+    target_frame_cfg: SceneEntityCfg,
+    position_threshold: float | None = 0.1,
+    rotation_threshold: float | None = 0.1,
 ) -> torch.Tensor:
-    """Terminate when EE reaches hover point above object."""
-    object_entity = env.scene[object_cfg.name]
-    target_frame = env.scene[target_cfg.name]
+    """Terminate episode when EE reaches hover target position.
     
-    object_pos = object_entity.data.root_pos_w[:, :3]
+    Matches the reach_goal_bonus success condition.
     
-    # Hover target
-    hover_target = object_pos.clone()
-    hover_target[:, 2] += hover_height
+    Args:
+        env: The environment instance.
+        source_frame_cfg: Configuration for the source frame (e.g., end-effector).
+        target_frame_cfg: Configuration for the target frame (e.g., hover target).
+        position_threshold: Distance threshold for success (meters). None to ignore position check.
+        rotation_threshold: Angular threshold for success (radians). None to ignore rotation check.
     
-    # EE position
-    ee_pos = target_frame.data.target_pos_w[..., 0, :3]
+    Returns:
+        Boolean tensor indicating which environments should terminate.
+    """
+
+    success = reach_goal_bonus(env, source_frame_cfg, target_frame_cfg, position_threshold, rotation_threshold)
     
-    distance = torch.norm(ee_pos - hover_target, p=2, dim=-1)
-    success = distance < threshold
-    
-    return success
+    return success > 0.5 # float (0.0 or 1.0) to boolean

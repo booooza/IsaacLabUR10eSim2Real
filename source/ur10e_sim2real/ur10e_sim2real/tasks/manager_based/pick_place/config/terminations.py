@@ -22,13 +22,13 @@ class PickPlaceTerminationsCfg:
         },
     )
 
-    # Success (for reach stage)
-    reach_success = DoneTerm(
-        func=mdp.reach_success_termination,
-        params={
-            "object_cfg": SceneEntityCfg("object"),
-            "target_cfg": SceneEntityCfg("ee_frame"),
-            "threshold": 0.01, # Success threshold in meters
-            "hover_height": 0.05, # Hover height above target in meters
-        },
-    )
+    # # Success termination - reaches hover target within position thresholds
+    # reach_success = DoneTerm(
+    #     func=mdp.reach_termination,
+    #     params={
+    #         "source_frame_cfg": SceneEntityCfg("ee_frame"),
+    #         "target_frame_cfg": SceneEntityCfg("hover_target_frame"),
+    #         "position_threshold": 0.1,
+    #         "rotation_threshold": None,
+    #     },
+    # )
