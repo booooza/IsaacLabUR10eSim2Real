@@ -1,6 +1,6 @@
 from isaaclab.utils import configclass
 from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place import mdp
-from isaaclab.envs.mdp.actions import JointEffortActionCfg, JointVelocityActionCfg, JointPositionActionCfg, BinaryJointVelocityActionCfg
+from isaaclab.envs.mdp.actions import JointEffortActionCfg, JointVelocityActionCfg, JointPositionActionCfg, BinaryJointVelocityActionCfg, RelativeJointPositionActionCfg, JointPositionToLimitsActionCfg, EMAJointPositionToLimitsActionCfg
 
 ##
 # MDP Configurations
@@ -14,11 +14,12 @@ class ReachStageActionsCfg:
     # Velocity Control - Velocity commands
     joint_velocities = JointVelocityActionCfg(
         asset_name="robot",
-        joint_names=["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", 
+        joint_names=["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
                     "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"],
-        scale=2.0,  # Maps [-1, 1] → [-2, 2] rad/s (joint velocity limits: ~2 rad/s)
+        scale=2.0,  # Maps [-1, 1] to [-2.0, 2.0] rad/s
+        use_default_offset=True,  # Defaults to zero velocity (stationary)
     )
-    
+        
     # NO gripper action - will be frozen via events
 
 @configclass  
@@ -41,13 +42,13 @@ class PickPlaceActionsCfg:
     #     scale=1.0,  # Actions are in rad/s
     # )
 
-    # Position Control - Position commands (or deltas)
+    # Position Control - Position commands
     joint_positions = JointPositionActionCfg(
         asset_name="robot",
         joint_names=["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", 
                     "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"],
-        scale=0.5,  # Actions are position deltas or absolute positions
-        use_default_offset=True,  # Relative to current position
+        scale=0.5,  # Actions are  absolute positions
+        use_default_offset=True,
     )
     
     # Gripper with centered action space

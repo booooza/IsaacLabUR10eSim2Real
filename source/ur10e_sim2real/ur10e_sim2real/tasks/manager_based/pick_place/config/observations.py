@@ -79,23 +79,6 @@ class PickPlaceObservationsCfg:
             params={"asset_cfg": SceneEntityCfg("ee_target_frame")},
         )
 
-        # Previous actions
-        prev_actions = ObservationTermCfg(func=last_action)
-        
-        def __post_init__(self):
-            self.enable_corruption = True
-            self.concatenate_terms = True
-    
-    @configclass
-    class CriticCfg(PolicyCfg):
-        """Critic observations (privileged, no noise)."""
-        
-        # Velocities (privileged)
-        joint_vel = ObservationTermCfg(
-            func=joint_vel_rel,
-            params={"asset_cfg": SceneEntityCfg("robot", joint_names=["shoulder_.*", "elbow_.*", "wrist_.*"])},
-        )
-
         # Task-specific object (ground-truth simulation state)
         object_position_base  = ObservationTermCfg(
             func=relative_position_from_scene_entity,
@@ -123,6 +106,23 @@ class PickPlaceObservationsCfg:
                 "object_cfg": SceneEntityCfg("object"),
                 "ee_frame_cfg": SceneEntityCfg("ee_frame"),
             }
+        )
+
+        # Previous actions
+        prev_actions = ObservationTermCfg(func=last_action)
+        
+        def __post_init__(self):
+            self.enable_corruption = True
+            self.concatenate_terms = True
+    
+    @configclass
+    class CriticCfg(PolicyCfg):
+        """Critic observations (privileged, no noise)."""
+        
+        # Velocities (privileged)
+        joint_vel = ObservationTermCfg(
+            func=joint_vel_rel,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=["shoulder_.*", "elbow_.*", "wrist_.*"])},
         )
         
         def __post_init__(self):

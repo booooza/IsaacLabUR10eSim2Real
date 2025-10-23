@@ -35,11 +35,11 @@ UR10e_HANDE_GRIPPER_CFG = ArticulationCfg(
         ),
         # Rigid body and articulation properties
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
-            disable_gravity=False,
+            disable_gravity=True,
             max_depenetration_velocity=5.0,
         ),
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
-            enabled_self_collisions=False,
+            enabled_self_collisions=True,
             solver_position_iteration_count=16,
             solver_velocity_iteration_count=1,
         ),
@@ -72,7 +72,7 @@ UR10e_HANDE_GRIPPER_CFG = ArticulationCfg(
             joint_names_expr=["shoulder_.*"],
             effort_limit_sim=330.0, # Size 4: 330 Nm [1]
             velocity_limit_sim=2.0944,  # 120 deg/s [2]
-            stiffness=1320.0, # [3]
+            stiffness=0.0,
             damping=72.6636085, # [3]
             friction=0.0,
             armature=0.0,
@@ -81,7 +81,7 @@ UR10e_HANDE_GRIPPER_CFG = ArticulationCfg(
             joint_names_expr=["elbow_joint"],
             effort_limit_sim=150.0, # Size 3: 150 Nm [1]
             velocity_limit_sim=3.1416,  # 180 deg/s [2]
-            stiffness=600.0, # [3]
+            stiffness=0.0,
             damping=34.64101615, # [3]
             friction=0.0,
             armature=0.0,
@@ -90,7 +90,7 @@ UR10e_HANDE_GRIPPER_CFG = ArticulationCfg(
             joint_names_expr=["wrist_.*"],
             effort_limit_sim=54.0, # Size 2: 54 Nm [1]
             velocity_limit_sim=3.1416,  # 180 deg/s [2]
-            stiffness=216.0, # [3]
+            stiffness=0.0,
             damping=29.39387691, # [3]
             friction=0.0,
             armature=0.0,

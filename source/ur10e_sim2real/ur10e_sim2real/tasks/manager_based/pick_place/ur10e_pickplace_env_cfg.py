@@ -114,14 +114,13 @@ class PickPlaceEnvPlayCfg(PickPlaceEnvCfg):
     def __post_init__(self):
         # Run parent post-init
         super().__post_init__()
+
+        # Viewer settings
+        self.viewer.eye = (1.5, -1.5, 1.5)
+        self.viewer.lookat = (0.0, 0.0, 0.0)
         
         # Longer episodes for testing
         self.episode_length_s = 1000.0
         
         # Use only 1 environment for teleop
         self.scene.num_envs = 1
-        
-        # Disable randomization during play
-        self.events.reset_robot_joints = None
-        self.events.reset_object = None
-        self.events.reset_target = None
