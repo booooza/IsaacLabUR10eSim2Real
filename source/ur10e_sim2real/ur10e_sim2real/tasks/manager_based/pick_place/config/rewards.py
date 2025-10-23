@@ -24,6 +24,18 @@ class ReachStageRewardsCfg:
         },
     )
 
+    # Exponential Distance Reward shaping (for smoother gradients)
+    # Max reward: ~1.0 (when distance = 0, right at target
+    distance_to_target_exp = RewardTermCfg(
+        func=mdp.distance_exponential,
+        weight=1.0,
+        params={
+            "source_frame_cfg": SceneEntityCfg("ee_frame"),
+            "target_frame_cfg": SceneEntityCfg("hover_target_frame"),
+            "sigma": 0.2,
+        },
+    )
+
     # Rotation Distance
     # Max reward: ~10.0 (when perfectly aligned)
     # The rotation is represented as the difference between quaternions (quat_diff). The smaller
@@ -35,12 +47,23 @@ class ReachStageRewardsCfg:
     # rot_reward_scale = 1.0, rot_eps = 0.1
     orientation_alignment = RewardTermCfg(
         func=mdp.orientation_alignment_l2,
-        weight=1.0,  # rot_reward_scale = 1.0
+        weight=0.3,  # rot_reward_scale = 1.0
         params={
             "source_frame_cfg": SceneEntityCfg("ee_frame"),
             "target_frame_cfg": SceneEntityCfg("hover_target_frame"),
             "rot_eps": 0.1,
         },
+    )
+
+    # Singularity Penalty: Penalize low manipulability
+    singularity_penalty = RewardTermCfg(
+        func=mdp.singularity_penalty,
+        weight=-100.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            # Keep robot in safer, more dexterous configurations
+            "threshold": 0.1,  # Penalize when manipulability < 0.1
+        }
     )
 
     # Action Penalty

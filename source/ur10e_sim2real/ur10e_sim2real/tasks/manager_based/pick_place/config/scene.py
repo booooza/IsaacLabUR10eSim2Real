@@ -69,8 +69,8 @@ class PickPlaceSceneCfg(InteractiveSceneCfg):
         spawn=sim_utils.CuboidCfg(
             size=(0.025, 0.025, 0.025),  # Base size: 2.5cm cube, will be randomized per env
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                kinematic_enabled=False, # Fixed during reach stage
-                disable_gravity=False, # Fixed during reach stage
+                kinematic_enabled=True,
+                disable_gravity=True,
                 solver_position_iteration_count=16,
                 solver_velocity_iteration_count=1,
                 max_depenetration_velocity=5.0,

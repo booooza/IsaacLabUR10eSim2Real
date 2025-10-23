@@ -99,6 +99,11 @@ class ReachStageObservationsCfg:
             func=joint_vel_rel,
             params={"asset_cfg": SceneEntityCfg("robot", joint_names=["shoulder_.*", "elbow_.*", "wrist_.*"])},
         )
+
+        manipulability = ObservationTermCfg(
+            func=mdp.manipulability_index,
+            params={"asset_cfg": SceneEntityCfg("robot")}
+        )
         
         def __post_init__(self):
             self.enable_corruption = False

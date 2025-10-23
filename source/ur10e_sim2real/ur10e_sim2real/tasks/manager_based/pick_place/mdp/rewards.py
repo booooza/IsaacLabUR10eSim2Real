@@ -40,6 +40,16 @@ def distance_l2(
     
     return distance
 
+def distance_exponential(
+    env: "ManagerBasedRLEnv",
+    source_frame_cfg: SceneEntityCfg,
+    target_frame_cfg: SceneEntityCfg,
+    sigma: float = 0.1,
+) -> torch.Tensor:
+    """Exponential distance reward: exp(-d²/2sigma²)"""
+    distance = distance_l2(env, source_frame_cfg, target_frame_cfg)
+    reward = torch.exp(-distance**2 / (2 * sigma**2))
+    return reward
 
 def orientation_alignment_l2(
     env: "ManagerBasedRLEnv",
@@ -132,6 +142,35 @@ def reach_goal_bonus(
         success = success & (rot_dist < rotation_threshold)
     
     return success.float()
+
+def manipulability_penalty(
+    env: "ManagerBasedRLEnv",
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    threshold: float = 0.01,
+) -> torch.Tensor:
+    """Penalty for approaching manipulability limits.
+    
+    Penalizes when manipulability drops below threshold.
+    
+    Args:
+        env: The environment instance.
+        asset_cfg: Configuration for the robot.
+        threshold: Manipulability threshold below which to penalize.
+    
+    Returns:
+        Penalty tensor shaped (num_envs,).
+    """
+    from .observations import manipulability_index
+    
+    manip = manipulability_index(env, asset_cfg).squeeze(-1)
+    
+    # Penalty only when below threshold
+    # Using quadratic: (threshold - μ)² when μ < threshold
+    penalty = torch.clamp(threshold - manip, min=0.0)
+    penalty = penalty ** 2  # Quadratic makes it smooth
+    
+    return penalty
+
 
 ## Additional reward functions for pick-and-place task
 def distance_reward_ee_to_object(

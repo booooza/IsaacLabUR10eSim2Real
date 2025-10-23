@@ -80,7 +80,7 @@ def relative_position_from_scene_entity(
     return frame_transformer.data.target_pos_source[..., target_index, :]  # (num_envs, 3)
 
 def relative_rotation_from_scene_entity(
-            env: "ManagerBasedRLEnv",
+    env: "ManagerBasedRLEnv",
     asset_cfg: SceneEntityCfg,
     target_index: int = 0,
 ) -> torch.Tensor:
@@ -99,3 +99,46 @@ def relative_rotation_from_scene_entity(
     frame_transformer = env.scene[asset_cfg.name]
     
     return frame_transformer.data.target_quat_source[..., target_index, :]  # (num_envs, 4)
+
+def manipulability_index(
+    env: "ManagerBasedRLEnv",
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Compute Yoshikawa manipulability index.
+    
+    μ = sqrt(det(J @ J^T))
+    
+    Higher values = further from singularities
+    Typical range: 0.001 (near singular) to 0.5 (good configuration)
+    
+    Args:
+        env: The environment instance.
+        asset_cfg: Configuration for the robot.
+    
+    Returns:
+        Manipulability index shaped (num_envs, 1).
+    """
+    robot = env.scene[asset_cfg.name]
+    
+    # Get end-effector Jacobian
+    ee_link_name = "robotiq_hande_end"
+    ee_jacobi_idx = robot.find_bodies(ee_link_name)[0][0]  # First body ID
+    
+    # Get Jacobian: shape (num_envs, 6, num_joints)
+    jacobian = robot.root_physx_view.get_jacobians()[
+        :, ee_jacobi_idx, :, asset_cfg.joint_ids
+    ]
+    
+    # Compute manipulability: μ = sqrt(det(J @ J^T))
+    # J @ J^T has shape (num_envs, 6, 6)
+    JJT = torch.bmm(jacobian, jacobian.transpose(-2, -1))
+    
+    # Determinant of 6x6 matrices
+    det = torch.det(JJT)
+    
+    # Clamp to avoid sqrt of negative (numerical errors)
+    det = torch.clamp(det, min=1e-12)
+    
+    manipulability = torch.sqrt(det)
+    
+    return manipulability.unsqueeze(-1)
