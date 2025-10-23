@@ -55,9 +55,9 @@ class ReachStageRewardsCfg:
         },
     )
 
-    # Singularity Penalty: Penalize low manipulability
-    singularity_penalty = RewardTermCfg(
-        func=mdp.singularity_penalty,
+    # Manipulability Penalty: Penalize low manipulability
+    manipulability_penalty = RewardTermCfg(
+        func=mdp.manipulability_penalty,
         weight=-100.0,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
