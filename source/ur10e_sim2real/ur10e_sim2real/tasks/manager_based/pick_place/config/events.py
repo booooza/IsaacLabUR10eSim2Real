@@ -10,7 +10,7 @@ from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.mdp.rew
 
 OBJECT_POSE_RANGE = {
     "x": (-0.25, 0.25),      # 0.0 ± 0.25 = [-0.25, 0.25]
-    "y": (0.25, -0.25),      # -0.45 ± 0.25 = [-0.7, -0.2]
+    "y": (0.15, -0.25),      # -0.45 + 0.15 = -0.3 (300 mm pinching hazard zone) / -0.45 - 0.25 = -0.7
     "z": (0.0, 0.0), 
     "roll": (0.0, 0.0),
     "pitch": (0.0, 0.0),

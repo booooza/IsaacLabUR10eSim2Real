@@ -69,17 +69,18 @@ class PickPlaceSceneCfg(InteractiveSceneCfg):
         spawn=sim_utils.CuboidCfg(
             size=(0.025, 0.025, 0.025),  # Base size: 2.5cm cube, will be randomized per env
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                kinematic_enabled=False, # Fixed during reach stage
+                disable_gravity=False, # Fixed during reach stage
                 solver_position_iteration_count=16,
                 solver_velocity_iteration_count=1,
                 max_depenetration_velocity=5.0,
-                disable_gravity=False,
             ),
             mass_props=sim_utils.MassPropertiesCfg(mass=0.1),  # Will be randomized
             collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.8, 0.2, 0.2)),
         ),
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(0.0, -0.45, 0.0), # Center of the workspace
+            pos=(0.0, -0.45, 0.0), # Center of the workspace (45cm in front of robot base)
             rot=(1, 0, 0, 0)
         ),
     )

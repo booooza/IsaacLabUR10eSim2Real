@@ -4,7 +4,7 @@ params:
   # environment wrapper clipping
   env:
     # added to the wrapper
-    clip_observations: 5.0
+    clip_observations: 100.0
     # can make custom wrapper?
     clip_actions: 1.0
 
@@ -30,7 +30,7 @@ params:
           val: 0
         fixed_sigma: True
     mlp:
-      units: [512, 256, 128]
+      units: [128, 64]
       activation: elu
       d2rl: False
 
@@ -43,7 +43,7 @@ params:
   load_path: '' # path to the checkpoint to load
 
   config:
-    name: cartpole_direct
+    name: reach_ur10e
     env_name: rlgpu
     device: 'cuda:0'
     device_name: 'cuda:0'
@@ -54,25 +54,26 @@ params:
     normalize_value: True
     num_actors: -1  # configured from the script (based on num_envs)
     reward_shaper:
-      scale_value: 0.1
+      scale_value: 1.0
     normalize_advantage: True
     gamma: 0.99
     tau : 0.95
-    learning_rate: 5e-3
+    learning_rate: 1e-3
     lr_schedule: adaptive
-    kl_threshold: 0.008
-    score_to_win: 20000
+    kl_threshold: 0.01
+    score_to_win: 2000
     max_epochs: 10000
-    save_best_after: 50
-    save_frequency: 25
+    save_best_after: 200
+    save_frequency: 100
+    print_stats: True
     grad_norm: 1.0
-    entropy_coef: 0.0
+    entropy_coef: 0.01
     truncate_grads: True
     e_clip: 0.2
-    horizon_length: 64
-    minibatch_size: 32768
+    horizon_length: 32 
+    minibatch_size: 8192 
     mini_epochs: 5
-    critic_coef: 4
+    critic_coef: 2
     clip_value: True
     seq_length: 4
     bounds_loss_coef: 0.0001

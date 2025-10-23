@@ -40,7 +40,7 @@ from isaaclab_assets import UR10e_ROBOTIQ_GRIPPER_CFG
 # Import MDP functions
 import isaaclab_tasks.manager_based.manipulation.reach.mdp as mdp
 
-from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.config import PickPlaceSceneCfg, PickPlaceActionsCfg, PickPlaceObservationsCfg, PickPlaceEventCfg, PickPlaceRewardsCfg, PickPlaceTerminationsCfg, PickPlaceCurriculumCfg
+from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.config import PickPlaceSceneCfg, PickPlaceActionsCfg, PickPlaceObservationsCfg, PickPlaceEventCfg, PickPlaceRewardsCfg, PickPlaceTerminationsCfg, PickPlaceCurriculumCfg, ReachStageObservationsCfg
 
 
 if TYPE_CHECKING:
@@ -59,7 +59,7 @@ class PickPlaceEnvCfg(ManagerBasedRLEnvCfg):
     
     # MDP components
     actions: ReachStageActionsCfg = ReachStageActionsCfg()
-    observations: PickPlaceObservationsCfg = PickPlaceObservationsCfg()
+    observations: ReachStageObservationsCfg = ReachStageObservationsCfg()
     events: ReachStageEventCfg = ReachStageEventCfg()
     rewards: ReachStageRewardsCfg = ReachStageRewardsCfg()
     terminations: PickPlaceTerminationsCfg = PickPlaceTerminationsCfg()
