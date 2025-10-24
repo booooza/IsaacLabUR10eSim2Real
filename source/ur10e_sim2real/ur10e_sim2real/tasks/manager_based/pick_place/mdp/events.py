@@ -1,4 +1,4 @@
-from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.mdp.rewards import POSITION_SUCCESS_THRESHOLD, ROTATION_SUCCESS_THRESHOLD, reach_success
+from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.mdp.rewards import REACH_POSITION_SUCCESS_THRESHOLD, REACH_ROTATION_SUCCESS_THRESHOLD, reach_success
 import torch
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.managers import SceneEntityCfg
@@ -15,8 +15,8 @@ def reset_object_on_success(
     target_frame_cfg: SceneEntityCfg,
     pose_range: dict,
     velocity_range: dict,
-    position_threshold: float | None = POSITION_SUCCESS_THRESHOLD,
-    rotation_threshold: float | None = ROTATION_SUCCESS_THRESHOLD,
+    position_threshold: float | None = REACH_POSITION_SUCCESS_THRESHOLD,
+    rotation_threshold: float | None = REACH_ROTATION_SUCCESS_THRESHOLD,
 ):
     """Reset object when reach goal is achieved.
     """    
@@ -38,8 +38,8 @@ def update_success_metrics(
     env_ids: torch.Tensor,
     source_frame_cfg: SceneEntityCfg,
     target_frame_cfg: SceneEntityCfg,
-    position_threshold: float = POSITION_SUCCESS_THRESHOLD,
-    rotation_threshold: float = ROTATION_SUCCESS_THRESHOLD,
+    position_threshold: float = REACH_POSITION_SUCCESS_THRESHOLD,
+    rotation_threshold: float = REACH_ROTATION_SUCCESS_THRESHOLD,
 ):
     """Track metrics for non-terminating multi-success reaching task."""
     combined_success = reach_goal_bonus(
