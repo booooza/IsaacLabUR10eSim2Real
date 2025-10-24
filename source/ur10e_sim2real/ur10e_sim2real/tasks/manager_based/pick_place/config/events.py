@@ -6,11 +6,11 @@ from isaaclab.managers import SceneEntityCfg
 
 # Import reset functions from MDP module
 from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place import mdp
-from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.mdp.rewards import POSITION_SUCCESS_THRESHOLD, ROTATION_SUCCESS_THRESHOLD
+from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.mdp.rewards import REACH_POSITION_SUCCESS_THRESHOLD, REACH_ROTATION_SUCCESS_THRESHOLD
 
 OBJECT_POSE_RANGE = {
     "x": (-0.25, 0.25),      # 0.0 ± 0.25 = [-0.25, 0.25]
-    "y": (0.15, -0.25),      # -0.45 + 0.15 = -0.3 (300 mm pinching hazard zone) / -0.45 - 0.25 = -0.7
+    "y": (0.25, -0.25),      # -0.60 + 0.25 = -0.35 (outside 300 mm pinching hazard zone) / -0.60 - 0.25 = -0.85 (still on table)
     "z": (0.0, 0.0), 
     "roll": (0.0, 0.0),
     "pitch": (0.0, 0.0),
@@ -37,8 +37,8 @@ class ReachStageEventCfg:
             "object_cfg": SceneEntityCfg("object"),
             "source_frame_cfg": SceneEntityCfg("ee_frame"),
             "target_frame_cfg": SceneEntityCfg("hover_target_frame"),
-            "position_threshold": POSITION_SUCCESS_THRESHOLD,
-            "rotation_threshold": ROTATION_SUCCESS_THRESHOLD,
+            "position_threshold": REACH_POSITION_SUCCESS_THRESHOLD,
+            "rotation_threshold": REACH_ROTATION_SUCCESS_THRESHOLD,
             "pose_range": OBJECT_POSE_RANGE,
             "velocity_range": OBJECT_VELOCITY_RANGE,
         },
@@ -51,8 +51,8 @@ class ReachStageEventCfg:
         params={
             "source_frame_cfg": SceneEntityCfg("ee_frame"),
             "target_frame_cfg": SceneEntityCfg("hover_target_frame"),
-            "position_threshold": POSITION_SUCCESS_THRESHOLD,
-            "rotation_threshold": ROTATION_SUCCESS_THRESHOLD,
+            "position_threshold": REACH_POSITION_SUCCESS_THRESHOLD,
+            "rotation_threshold": REACH_ROTATION_SUCCESS_THRESHOLD,
         },
     )
 
@@ -90,8 +90,8 @@ class PickPlaceEventCfg:
             "object_cfg": SceneEntityCfg("object"),
             "source_frame_cfg": SceneEntityCfg("ee_frame"),
             "target_frame_cfg": SceneEntityCfg("hover_target_frame"),
-            "position_threshold": POSITION_SUCCESS_THRESHOLD,
-            "rotation_threshold": ROTATION_SUCCESS_THRESHOLD,
+            "position_threshold": REACH_POSITION_SUCCESS_THRESHOLD,
+            "rotation_threshold": REACH_ROTATION_SUCCESS_THRESHOLD,
             "pose_range": OBJECT_POSE_RANGE,
             "velocity_range": OBJECT_VELOCITY_RANGE,
         },

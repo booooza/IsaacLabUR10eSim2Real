@@ -25,7 +25,7 @@ class PickPlaceSceneCfg(InteractiveSceneCfg):
     ground = AssetBaseCfg(
         prim_path="/World/ground",
         spawn=sim_utils.GroundPlaneCfg(),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.0, 0.0, -0.793)),  # Lowered to align with table surface
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.0, 0.0, -1.05)),  # Lowered to align with table surface
     )
     
     # Table - Thorlabs table around 0.79m high, 0.9m long and 0.6m wide
@@ -35,11 +35,11 @@ class PickPlaceSceneCfg(InteractiveSceneCfg):
     table = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/Table",
         spawn=sim_utils.UsdFileCfg(
-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Mounts/ThorlabsTable/table_instanceable.usd",
+            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Mounts/SeattleLabTable/table_instanceable.usd",
         ),
         init_state=AssetBaseCfg.InitialStateCfg(
-            pos=(0.0, -0.05, 0.0), 
-            rot=(0.7071068, 0.0, 0.0, -0.7071068),  # -90° around Z-axis
+            pos=(0.0, -0.55, 0.0), 
+            rot=(0.0, 0.0, 0.0, -0.0),  # -90° around Z-axis
         ),
     )
 
@@ -69,8 +69,7 @@ class PickPlaceSceneCfg(InteractiveSceneCfg):
         spawn=sim_utils.CuboidCfg(
             size=(0.025, 0.025, 0.025),  # Base size: 2.5cm cube, will be randomized per env
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                kinematic_enabled=True,
-                disable_gravity=True,
+                disable_gravity=False,
                 solver_position_iteration_count=16,
                 solver_velocity_iteration_count=1,
                 max_depenetration_velocity=5.0,
@@ -80,7 +79,7 @@ class PickPlaceSceneCfg(InteractiveSceneCfg):
             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.8, 0.2, 0.2)),
         ),
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(0.0, -0.45, 0.0), # Center of the workspace (45cm in front of robot base)
+            pos=(0.0, -0.60, 0.0), # Center of the workspace (60cm in front of robot base)
             rot=(1, 0, 0, 0)
         ),
     )
@@ -197,7 +196,7 @@ class PickPlaceSceneCfg(InteractiveSceneCfg):
 
     # TCP relative to target
     ee_target_frame = FrameTransformerCfg(
-        prim_path="{ENV_REGEX_NS}/Target",  # SOURCE = target
+        prim_path="{ENV_REGEX_NS}/Target",
         target_frames=[
             FrameTransformerCfg.FrameCfg(
                 prim_path="{ENV_REGEX_NS}/Robot/robotiq_hande_end",
