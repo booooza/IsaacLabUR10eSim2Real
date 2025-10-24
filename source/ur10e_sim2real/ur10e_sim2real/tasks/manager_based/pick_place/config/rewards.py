@@ -15,6 +15,7 @@ class ReachStageRewardsCfg:
     # The distance d_goal measures how close the end effector is to the target. A smaller
     # distance means that the end effector is closer to the target, which is desirable to fulfill the task.
     # d_goal = ||obj_pos - target_pos||_2
+    # Coarse guidance when far from target
     distance_to_target = RewardTermCfg(
         func=mdp.distance_l2,
         weight=-2.0,  # dist_reward_scale = -2.0
@@ -26,15 +27,25 @@ class ReachStageRewardsCfg:
 
     # Exponential Distance Reward shaping (for smoother gradients)
     # Max reward: ~1.0 (when distance = 0, right at target
-    distance_to_target_exp = RewardTermCfg(
-        func=mdp.distance_exponential,
-        weight=1.0,
-        params={
-            "source_frame_cfg": SceneEntityCfg("ee_frame"),
-            "target_frame_cfg": SceneEntityCfg("hover_target_frame"),
-            "sigma": 0.2,
-        },
-    )
+    # distance_to_target_exp = RewardTermCfg(
+    #     func=mdp.distance_exponential,
+    #     weight=1.0,
+    #     params={
+    #         "source_frame_cfg": SceneEntityCfg("ee_frame"),
+    #         "target_frame_cfg": SceneEntityCfg("hover_target_frame"),
+    #         "sigma": 0.2,
+    #     },
+    # )
+    # Tanh Distance Reward shaping (for smoother gradients near target)
+    # distance_to_target_tanh = RewardTermCfg(
+    #     func=mdp.distance_tanh,  # You need to implement this
+    #     weight=0.1,  # Positive weight since tanh returns [0,1]
+    #     params={
+    #         "source_frame_cfg": SceneEntityCfg("ee_frame"),
+    #         "target_frame_cfg": SceneEntityCfg("hover_target_frame"),
+    #         "std": 0.1,  # Same as Isaac Lab uses
+    #     },
+    # )
 
     # Rotation Distance
     # Max reward: ~10.0 (when perfectly aligned)
@@ -47,44 +58,88 @@ class ReachStageRewardsCfg:
     # rot_reward_scale = 1.0, rot_eps = 0.1
     orientation_alignment = RewardTermCfg(
         func=mdp.orientation_alignment_l2,
-        weight=0.3,  # rot_reward_scale = 1.0
+        weight=0.5,  # rot_reward_scale = 1.0
         params={
             "source_frame_cfg": SceneEntityCfg("ee_frame"),
             "target_frame_cfg": SceneEntityCfg("hover_target_frame"),
             "rot_eps": 0.1,
         },
     )
+    # orientation_angular_error = RewardTermCfg(
+    #     func=mdp.orientation_angular_error,
+    #     weight=-0.1,
+    #     params={
+    #         "source_frame_cfg": SceneEntityCfg("ee_frame"),
+    #         "target_frame_cfg": SceneEntityCfg("hover_target_frame"),
+    #     },
+    # )
 
     # Manipulability Penalty: Penalize low manipulability
     manipulability_penalty = RewardTermCfg(
         func=mdp.manipulability_penalty,
-        weight=-100.0,
+        weight=-1.0,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             # Keep robot in safer, more dexterous configurations
-            "threshold": 0.1,  # Penalize when manipulability < 0.1
+            "threshold": 0.05,  # Penalize when manipulability < 0.05
         }
     )
 
-    # Action Penalty
+    # Action Penalties
     # r_act = -( \sum_{t=1}^{6} a_t^2 ) * action_penalty_scale
     # action_penalty_scale = -0.0002
+    # Penalize the actions using L2 squared kernel.
     action_penalty = RewardTermCfg(
         func=mdp.action_l2,
         weight=-0.0002,
     )
 
+    # Penalize the rate of change of the actions using L2 squared kernel.
+    action_rate_penalty = RewardTermCfg(
+        func=mdp.action_rate_l2,
+        weight=-1e-5,  # will be modified by curriculum up to -0.001
+    )
+
+    # Joint Position Limits Penalty
+    joint_pos_limits_penalty = RewardTermCfg(
+        func=mdp.joint_pos_limits,
+        weight=-0.05,
+        params={"asset_cfg": SceneEntityCfg("robot")},
+    )
+
+    # Joint Velocity Penalty when near target
+    # Encourage slowing down near the target but move fast when far away.
+    joint_vel_penalty_near_target = RewardTermCfg(
+        func=mdp.joint_velocity_l2_conditional,
+        weight=-1e-5,  # will be modified by curriculum up to -0.5
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "source_frame_cfg": SceneEntityCfg("ee_frame"),
+            "target_frame_cfg": SceneEntityCfg("hover_target_frame"),
+            "distance_threshold": 0.05,
+        },
+    )
+
     # Reach Bonus: Sparse reward when reaching target
     # successTolerance = 0.1
-
     reach_pose_bonus = RewardTermCfg(
         func=mdp.reach_goal_bonus,
         weight=250.0,  # reach_goal_bonus = 250
         params={
             "source_frame_cfg": SceneEntityCfg("ee_frame"),
             "target_frame_cfg": SceneEntityCfg("hover_target_frame"),
-            "position_threshold": POSITION_SUCCESS_THRESHOLD,
-            "rotation_threshold": ROTATION_SUCCESS_THRESHOLD,
+            "position_threshold": REACH_POSITION_SUCCESS_THRESHOLD,
+            "rotation_threshold": REACH_ROTATION_SUCCESS_THRESHOLD,
+        },
+    )
+    precision_bonus = RewardTermCfg(
+        func=mdp.precision_bonus,
+        weight=50.0,
+        params={
+            "source_frame_cfg": SceneEntityCfg("ee_frame"),
+            "target_frame_cfg": SceneEntityCfg("hover_target_frame"),
+            "position_scale": 0.002,  # 2mm scale
+            "rotation_scale": 0.05,  # ~2° scale
         },
     )
 
@@ -93,13 +148,6 @@ class ReachStageRewardsCfg:
     # reach_goal_bonus = 250
     # dist_reward_scale = -2.0
     # velObsScale = 0.2
-
-    # Optional: Joint velocity penalty (using velObsScale = 0.2)
-    # joint_vel_penalty = RewardTermCfg(
-    #     func=mdp.joint_vel_l2,
-    #     weight=-0.0001,
-    #     params={"asset_cfg": SceneEntityCfg("robot")},
-    # )
 
 @configclass
 class PickPlaceRewardsCfg:

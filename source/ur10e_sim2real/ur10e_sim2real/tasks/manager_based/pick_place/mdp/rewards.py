@@ -10,8 +10,8 @@ if TYPE_CHECKING:
 
 from isaaclab.utils.math import quat_mul, quat_conjugate
 
-POSITION_SUCCESS_THRESHOLD = 0.05 # 5 cm
-ROTATION_SUCCESS_THRESHOLD = 0.2 # ~11.5 degrees
+REACH_POSITION_SUCCESS_THRESHOLD = 0.05 # 5 cm
+REACH_ROTATION_SUCCESS_THRESHOLD = 0.2 # ~11.5 degrees
 
 def distance_l2(
     env: "ManagerBasedRLEnv",
@@ -49,6 +49,34 @@ def distance_exponential(
     """Exponential distance reward: exp(-d²/2sigma²)"""
     distance = distance_l2(env, source_frame_cfg, target_frame_cfg)
     reward = torch.exp(-distance**2 / (2 * sigma**2))
+    return reward
+
+def distance_tanh(
+    env: "ManagerBasedRLEnv",
+    source_frame_cfg: SceneEntityCfg,
+    target_frame_cfg: SceneEntityCfg,
+    std: float = 0.1,
+) -> torch.Tensor:
+    """Tanh-shaped distance reward (Isaac Lab style).
+    
+    Returns reward in [0, 1] where:
+    - 1.0 = at target
+    - 0.5 = at distance 'std'
+    - 0.0 = very far
+    
+    Args:
+        env: The environment instance.
+        source_frame_cfg: Source frame (e.g., end-effector).
+        target_frame_cfg: Target frame (e.g., hover target).
+        std: Standard deviation controlling reward steepness.
+             Smaller = steeper (harder), Larger = gentler (easier)
+    
+    Returns:
+        Reward tensor shaped (num_envs,).
+    """
+    distance = distance_l2(env, source_frame_cfg, target_frame_cfg)
+    reward = 1.0 - torch.tanh(distance / std)
+    # Tanh kernel: closer to target = higher reward
     return reward
 
 def orientation_alignment_l2(
@@ -93,12 +121,29 @@ def orientation_alignment_l2(
     
     return reward
 
+def orientation_angular_error(
+    env: "ManagerBasedRLEnv",
+    source_frame_cfg: SceneEntityCfg,
+    target_frame_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Simple orientation angular error between source and target quaternions in radians."""
+    from isaaclab.utils.math import quat_error_magnitude
+    
+    source_frame = env.scene[source_frame_cfg.name]
+    target_frame = env.scene[target_frame_cfg.name]
+    
+    source_quat = source_frame.data.target_quat_w[..., 0, :]
+    target_quat = target_frame.data.target_quat_w[..., 0, :]
+    
+    # Returns angular error in radians
+    return quat_error_magnitude(source_quat, target_quat)
+
 def reach_goal_bonus(
     env: "ManagerBasedRLEnv",
     source_frame_cfg: SceneEntityCfg,
     target_frame_cfg: SceneEntityCfg,
-    position_threshold: float | None = POSITION_SUCCESS_THRESHOLD,
-    rotation_threshold: float | None = ROTATION_SUCCESS_THRESHOLD,
+    position_threshold: float | None = REACH_POSITION_SUCCESS_THRESHOLD,
+    rotation_threshold: float | None = REACH_ROTATION_SUCCESS_THRESHOLD,
 ) -> torch.Tensor:
     """Sparse bonus when source frame reaches target frame with correct pose.
     
@@ -140,8 +185,55 @@ def reach_goal_bonus(
         rot_dist = 2.0 * torch.asin(xyz_norm_clamped)
         
         success = success & (rot_dist < rotation_threshold)
+
+    if (success.any() and position_threshold is not None and rotation_threshold is not None):
+        print(f"Reached goal pose for {success.sum().item()} envs.")
     
     return success.float()
+
+def precision_bonus(
+    env: "ManagerBasedRLEnv",
+    source_frame_cfg: SceneEntityCfg,
+    target_frame_cfg: SceneEntityCfg,
+    position_scale: float = 0.01,
+    rotation_scale: float = 0.05,
+) -> torch.Tensor:
+    """Exponential bonus for high precision reaching.
+    
+    Rewards getting very close to the target with exponential scaling.
+    This encourages the final millimeters of precision.
+    
+    Args:
+        env: Environment instance
+        source_frame_cfg: End-effector frame
+        target_frame_cfg: Target frame
+        position_scale: Distance scale for exponential (smaller = more precise)
+        rotation_scale: Rotation scale for exponential
+        
+    Returns:
+        Precision bonus [0, 1]
+    """
+    source_frame = env.scene[source_frame_cfg.name]
+    target_frame = env.scene[target_frame_cfg.name]
+    
+    # Position error
+    source_pos = source_frame.data.target_pos_w[..., 0, :3]
+    target_pos = target_frame.data.target_pos_w[..., 0, :3]
+    pos_error = torch.norm(target_pos - source_pos, p=2, dim=-1)
+    
+    # Rotation error (uses Isaac Lab's quaternion error magnitude)
+    source_quat = source_frame.data.target_quat_w[..., 0, :]
+    target_quat = target_frame.data.target_quat_w[..., 0, :]
+    from isaaclab.utils.math import quat_error_magnitude
+    rot_error = quat_error_magnitude(source_quat, target_quat)
+    
+    # Exponential bonus (peaks when error → 0)
+    # exp(-error/scale): smaller scale = steeper falloff = harder to get reward
+    pos_bonus = torch.exp(-pos_error / position_scale)
+    rot_bonus = torch.exp(-rot_error / rotation_scale)
+    
+    # Multiply bonuses: both position AND orientation must be good
+    return pos_bonus * rot_bonus
 
 def manipulability_penalty(
     env: "ManagerBasedRLEnv",
@@ -171,7 +263,66 @@ def manipulability_penalty(
     
     return penalty
 
+def joint_velocity_l2_conditional(
+    env: "ManagerBasedRLEnv",
+    asset_cfg: SceneEntityCfg,
+    source_frame_cfg: SceneEntityCfg,
+    target_frame_cfg: SceneEntityCfg,
+    distance_threshold: float,
+) -> torch.Tensor:
+    """Penalize joint velocities only when close to target.
+    """
+    robot = env.scene[asset_cfg.name]
+    source_frame = env.scene[source_frame_cfg.name]
+    target_frame = env.scene[target_frame_cfg.name]
+    
+    # Distance check
+    distance = torch.norm(
+        source_frame.data.target_pos_w[..., 0, :3] - target_frame.data.target_pos_w[..., 0, :3],
+        dim=-1
+    )
+    
+    # Joint velocity magnitude
+    joint_vel = robot.data.joint_vel[:, :6]  # Arm joints only
+    vel_l2 = torch.sum(torch.square(joint_vel), dim=1)
+    
+    # CONDITIONAL: only penalize when close (Isaac Lab pattern)
+    is_close = distance < distance_threshold
+    return torch.where(is_close, vel_l2, torch.zeros_like(vel_l2))
 
+def minimum_link_distance(
+    env: "ManagerBasedRLEnv",
+    asset_cfg: SceneEntityCfg,
+    min_distance: float = 0.05,
+    link_pairs: list = None,
+) -> torch.Tensor:
+    """Penalize when robot links get too close to each other."""
+    robot = env.scene[asset_cfg.name]
+    
+    # Get link positions
+    link_pos_w = robot.data.body_pos_w
+    
+    # Calculate minimum distances between specified link pairs
+    penalties = []
+    for link1_name, link2_name in link_pairs:
+        # Get link indices
+        link1_idx = robot.find_bodies(link1_name)[0][0]
+        link2_idx = robot.find_bodies(link2_name)[0][0]
+        
+        # Calculate distance
+        distance = torch.norm(
+            link_pos_w[:, link1_idx] - link_pos_w[:, link2_idx], 
+            dim=-1
+        )
+        
+        # Penalize when closer than min_distance
+        penalty = torch.clamp(min_distance - distance, min=0.0)
+        penalties.append(penalty)
+    
+    # Return maximum penalty across all link pairs
+    return torch.stack(penalties, dim=-1).max(dim=-1)[0]
+
+# ----
 ## Additional reward functions for pick-and-place task
 def distance_reward_ee_to_object(
     env: "ManagerBasedRLEnv",
