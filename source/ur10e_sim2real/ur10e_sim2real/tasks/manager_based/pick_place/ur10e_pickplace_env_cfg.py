@@ -72,16 +72,22 @@ class PickPlaceEnvCfg(ManagerBasedRLEnvCfg):
         """Post initialization."""
         # General settings
         self.seed = 42
-        self.decimation = 2  # 125 Hz control frequency
+        self.decimation = 2  # 30 Hz control frequency
 
         # episode_length_steps = ceil(episode_length_s / (decimation_rate * physics_time_step))
-        self.episode_length_s = 8.0  # ceil(8.0 / (2 * 0.004)) = 1000 steps per episode
+        self.episode_length_s = 12.0  # ceil(8.0 / (2 * 0.004)) = 1000 steps per episode
         
         # Simulation settings
         # The physics simulation time-step (in seconds).
-        self.sim.dt = 0.004  # 1/0.004 = 250 Hz physics
+        # self.sim.dt = 0.004  # 1/0.004 = 250 Hz physics
+        self.sim.dt = 1.0 / 60.0  # 60 Hz physics
         self.sim.render_interval = self.decimation
-        
+
+        # Target settings for sim-to-real transfer
+        # self.decimation = 2  # 125 Hz control frequency
+        # self.episode_length_s = 8.0 # ceil(8.0 / (2 * 0.004)) = 1000 steps per episode
+        # self.sim.dt = 0.004  # 1/0.004 = 250 Hz physics
+
         # PhysX settings - for stable physics
         self.sim.physx.bounce_threshold_velocity = 0.2
         self.sim.physx.gpu_found_lost_aggregate_pairs_capacity = 1024 * 1024 * 4
