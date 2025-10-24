@@ -40,10 +40,13 @@ UR10e_HANDE_GRIPPER_CFG = ArticulationCfg(
         ),
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
             enabled_self_collisions=True,
-            solver_position_iteration_count=16,
-            solver_velocity_iteration_count=1,
+            # https://docs.isaacsim.omniverse.nvidia.com/latest/robot_setup_tutorials/tutorial_configure_manipulator.html
+            solver_position_iteration_count=64,
+            solver_velocity_iteration_count=4,
+            sleep_threshold=0.00005,
+            stabilization_threshold=0.00001
         ),
-        activate_contact_sensors=False,
+        activate_contact_sensors=True,
     ),
     init_state=ArticulationCfg.InitialStateCfg(
         joint_pos={
@@ -72,7 +75,7 @@ UR10e_HANDE_GRIPPER_CFG = ArticulationCfg(
             joint_names_expr=["shoulder_.*"],
             effort_limit_sim=330.0, # Size 4: 330 Nm [1]
             velocity_limit_sim=2.0944,  # 120 deg/s [2]
-            stiffness=0.0,
+            stiffness=10.0,
             damping=72.6636085, # [3]
             friction=0.0,
             armature=0.0,
@@ -81,7 +84,7 @@ UR10e_HANDE_GRIPPER_CFG = ArticulationCfg(
             joint_names_expr=["elbow_joint"],
             effort_limit_sim=150.0, # Size 3: 150 Nm [1]
             velocity_limit_sim=3.1416,  # 180 deg/s [2]
-            stiffness=0.0,
+            stiffness=5.0,
             damping=34.64101615, # [3]
             friction=0.0,
             armature=0.0,
@@ -90,7 +93,7 @@ UR10e_HANDE_GRIPPER_CFG = ArticulationCfg(
             joint_names_expr=["wrist_.*"],
             effort_limit_sim=54.0, # Size 2: 54 Nm [1]
             velocity_limit_sim=3.1416,  # 180 deg/s [2]
-            stiffness=0.0,
+            stiffness=2.5,
             damping=29.39387691, # [3]
             friction=0.0,
             armature=0.0,

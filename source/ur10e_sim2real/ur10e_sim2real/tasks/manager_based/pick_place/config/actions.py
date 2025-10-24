@@ -16,7 +16,7 @@ class ReachStageActionsCfg:
         asset_name="robot",
         joint_names=["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
                     "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"],
-        scale=2.0,  # Maps [-1, 1] to [-2.0, 2.0] rad/s
+        scale=1.0,  # Maps [-1, 1] to [-1.0, 1.0] rad/s
         use_default_offset=True,  # Defaults to zero velocity (stationary)
     )
         
