@@ -30,7 +30,7 @@ class ReachStageObservationsCfg:
     class PolicyCfg(ObservationGroupCfg):
         """Actor observations (with noise)."""
         
-        # Proprioception
+        # === PROPRIOCEPTION ===
         joint_pos_norm = ObservationTermCfg(
             func=joint_pos_limit_normalized,
             params={
@@ -42,46 +42,70 @@ class ReachStageObservationsCfg:
             },
             # noise=GaussianNoise(mean=0.0, std=0.001),  # TODO: Encoder noise
         )
+
+        joint_vel = ObservationTermCfg(
+            func=joint_vel_rel,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=["shoulder_.*", "elbow_.*", "wrist_.*"])},
+            # noise=GaussianNoise(mean=0.0, std=0.01),  # TODO: encoder noise
+        )
         
-        # End-effector state
-        tcp_position_base  = ObservationTermCfg(
+        # === CURRENT EE STATE ===
+        tcp_position_base = ObservationTermCfg(
             func=relative_position_from_scene_entity,
             params={"asset_cfg": SceneEntityCfg("ee_frame")},
         )
 
-        tcp_rotation_base  = ObservationTermCfg(
+        tcp_rotation_base = ObservationTermCfg(
             func=relative_rotation_from_scene_entity,
             params={"asset_cfg": SceneEntityCfg("ee_frame")},
         )
 
-        # Task-specific object (ground-truth simulation state)
-        object_position_base  = ObservationTermCfg(
+        # === OBJECT STATE (from vision in real) ===
+        object_position_base = ObservationTermCfg(
             func=relative_position_from_scene_entity,
             params={"asset_cfg": SceneEntityCfg("object_frame")},
             # noise=GaussianNoise(mean=0.0, std=0.01),  # TODO: Vision noise
         )
 
-        object_rotation_base  = ObservationTermCfg(
+        object_rotation_base = ObservationTermCfg(
             func=relative_rotation_from_scene_entity,
             params={"asset_cfg": SceneEntityCfg("object_frame")},
             # noise=GaussianNoise(mean=0.0, std=0.01),  # TODO: Vision noise
         )
 
-        # Object Awareness: TCP rotation relative to object and target
-        tcp_to_object_rotation = ObservationTermCfg(
+        # === TARGET STATE (computed from object) ===
+        target_position_base  = ObservationTermCfg(
+            func=relative_position_from_scene_entity,
+            params={"asset_cfg": SceneEntityCfg("hover_target_frame")},
+        )
+
+        target_rotation_base  = ObservationTermCfg(
             func=relative_rotation_from_scene_entity,
-            params={"asset_cfg": SceneEntityCfg("ee_object_frame")},
-            # noise=GaussianNoise(mean=0.0, std=0.01),  # TODO: Vision noise
+            params={"asset_cfg": SceneEntityCfg("hover_target_frame")},
         )
+
+        # === RELATIVE TRANSFORMS (useful for grasping) ===
+        # These are redundant, as they can be computed from the above but could help learning.
+        # tcp_to_target_rotation = ObservationTermCfg(
+        #     func=mdp.relative_rotation_from_scene_entity,
+        #     params={"asset_cfg": SceneEntityCfg("ee_target_frame")},
+        # )
+
+        # # Object Awareness: TCP rotation relative to object and target
+        # tcp_to_object_rotation = ObservationTermCfg(
+        #     func=relative_rotation_from_scene_entity,
+        #     params={"asset_cfg": SceneEntityCfg("ee_object_frame")},
+        #     # noise=GaussianNoise(mean=0.0, std=0.01),  # TODO: Vision noise
+        # )
         
-        # Distance to target
-        distance_to_object = ObservationTermCfg(
-            func=distance_to_object,
-            params={
-                "object_cfg": SceneEntityCfg("object"),
-                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
-            }
-        )
+        # # Distance to target
+        # distance_to_object = ObservationTermCfg(
+        #     func=distance_to_object,
+        #     params={
+        #         "object_cfg": SceneEntityCfg("object"),
+        #         "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+        #     }
+        # )
 
         # Previous actions
         prev_actions = ObservationTermCfg(func=last_action)
@@ -93,12 +117,6 @@ class ReachStageObservationsCfg:
     @configclass
     class CriticCfg(PolicyCfg):
         """Critic observations (privileged, no noise)."""
-        
-        # Velocities (privileged)
-        joint_vel = ObservationTermCfg(
-            func=joint_vel_rel,
-            params={"asset_cfg": SceneEntityCfg("robot", joint_names=["shoulder_.*", "elbow_.*", "wrist_.*"])},
-        )
 
         manipulability = ObservationTermCfg(
             func=mdp.manipulability_index,
