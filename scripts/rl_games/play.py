@@ -9,6 +9,11 @@
 
 import argparse
 import sys
+import torch
+import csv
+import numpy as np
+from pathlib import Path
+from datetime import datetime
 
 from isaaclab.app import AppLauncher
 
@@ -37,6 +42,8 @@ parser.add_argument(
     help="When no checkpoint provided, use the last saved model. Otherwise use the best saved model.",
 )
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
+parser.add_argument("--debug", action="store_true", default=False, help="Enable debug logs.")
+
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
@@ -70,6 +77,9 @@ from isaaclab.envs import (
     ManagerBasedRLEnvCfg,
     multi_agent_to_single_agent,
 )
+
+from isaaclab.sensors import FrameTransformerCfg
+from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
 from isaaclab.utils.assets import retrieve_file_path
 from isaaclab.utils.dict import print_dict
 from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
@@ -205,7 +215,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             # agent stepping
             actions = agent.get_action(obs, is_deterministic=agent.is_deterministic)
             # env stepping
-            obs, _, dones, _ = env.step(actions)
+            obs, rew, dones, extras = env.step(actions)
+            # logging
+            if args_cli.debug:
+                log(log_dir, env.unwrapped.scene, env.unwrapped.common_step_counter, dt, env.unwrapped.episode_length_buf)
 
             # perform operations for terminated episodes
             if len(dones) > 0:
@@ -227,7 +240,101 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # close the simulator
     env.close()
 
-
+def log(log_dir: str, scene: InteractiveScene, step_count: int, dt: float, episode_length_buf: torch.Tensor):
+    """Log environment information during play."""
+    csv_file = Path(log_dir) / "play_log.csv"
+    file_exists = csv_file.exists()
+    
+    # Get robot data
+    robot = scene.articulations['robot']
+    joint_names = robot._data.joint_names
+    num_envs = robot._data.joint_pos.shape[0]
+    joint_pos = robot._data.joint_pos  # (num_envs, 8)
+    joint_pos_target = robot._data.joint_pos_target  # (num_envs, 8)
+    joint_pos_limits = robot._data.joint_pos_limits  # (num_envs, 8, 2)
+    soft_joint_pos_limits = robot._data.soft_joint_pos_limits  # (num_envs, 8, 2)
+    
+    joint_vel = robot._data.joint_vel  # (num_envs, 8)
+    joint_vel_target = robot._data.joint_vel_target  # (num_envs, 8)
+    joint_vel_limits = robot._data.joint_vel_limits  # (num_envs, 8)
+    soft_joint_vel_limits = robot._data.soft_joint_vel_limits  # torch.Size([1, 8])
+    
+    # Calculate simulation time from step counter
+    sim_time = step_count * dt
+    
+    # Get end effector data
+    ee_frame_transform = scene['ee_frame']
+    ee_frame_pos = ee_frame_transform.data.target_pos_source  # torch.Size([num_envs, 1, 3])
+    
+    with open(csv_file, 'a', newline='') as f:
+        writer = csv.writer(f)
+        
+        # Write header if new file
+        if not file_exists:
+            header = ['step', 'sim_time', 'env_id', 'episode_step']
+            # Add joint position columns
+            for name in joint_names:
+                header.append(f'{name}_pos')
+            # Add joint position target columns
+            for name in joint_names:
+                header.append(f'{name}_pos_target')
+            # Add joint velocity columns
+            for name in joint_names:
+                header.append(f'{name}_vel')
+            # Add joint velocity target columns
+            for name in joint_names:
+                header.append(f'{name}_vel_target')
+            # Add joint position limits (lower and upper)
+            for name in joint_names:
+                header.append(f'{name}_pos_limit_lower')
+                header.append(f'{name}_pos_limit_upper')
+            # Add soft joint position limits (lower and upper)
+            for name in joint_names:
+                header.append(f'{name}_soft_pos_limit_lower')
+                header.append(f'{name}_soft_pos_limit_upper')
+            # Add joint velocity limits
+            for name in joint_names:
+                header.append(f'{name}_vel_limit')
+            # Add soft joint velocity limits (lower and upper)
+            for name in joint_names:
+                header.append(f'{name}_soft_vel_limit')
+            # Add end effector position columns
+            header.extend(['ee_frame_pos_x', 'ee_frame_pos_y', 'ee_frame_pos_z'])
+            writer.writerow(header)
+        
+        # Write data for each environment
+        for env_id in range(num_envs):
+            row = [step_count, sim_time, env_id, episode_length_buf[env_id].item()]
+            
+            # Add joint positions
+            row.extend(joint_pos[env_id].cpu().numpy().tolist())
+            # Add joint position targets
+            row.extend(joint_pos_target[env_id].cpu().numpy().tolist())
+            # Add joint velocities
+            row.extend(joint_vel[env_id].cpu().numpy().tolist())
+            # Add joint velocity targets
+            row.extend(joint_vel_target[env_id].cpu().numpy().tolist())
+            # Add joint position limits (lower, upper for each joint)
+            for joint_idx in range(len(joint_names)):
+                row.append(joint_pos_limits[env_id, joint_idx, 0].item())  # lower limit
+                row.append(joint_pos_limits[env_id, joint_idx, 1].item())  # upper limit
+            # Add soft joint position limits (lower, upper for each joint)
+            for joint_idx in range(len(joint_names)):
+                row.append(soft_joint_pos_limits[env_id, joint_idx, 0].item())  # soft lower limit
+                row.append(soft_joint_pos_limits[env_id, joint_idx, 1].item())  # soft upper limit
+            # Add joint velocity limits
+            row.extend(joint_vel_limits[env_id].cpu().numpy().tolist())
+            # Add soft joint velocity limits (symmetric, so ±soft_vel_limit)
+            row.extend(soft_joint_vel_limits[env_id].cpu().numpy().tolist())
+            # Add end effector frame positions
+            row.extend([
+                ee_frame_pos[env_id, 0, 0].item(),
+                ee_frame_pos[env_id, 0, 1].item(),
+                ee_frame_pos[env_id, 0, 2].item()
+            ])
+            
+            writer.writerow(row)
+          
 if __name__ == "__main__":
     # run the main function
     main()
