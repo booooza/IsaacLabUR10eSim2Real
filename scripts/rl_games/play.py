@@ -265,7 +265,17 @@ def log(log_dir: str, scene: InteractiveScene, step_count: int, dt: float, episo
     # Get end effector data
     ee_frame_transform = scene['ee_frame']
     ee_frame_pos = ee_frame_transform.data.target_pos_source  # torch.Size([num_envs, 1, 3])
+        
+    # Get task data
+    hover_target_frame = scene['hover_target_frame']
+    hover_target_pos = hover_target_frame.data.target_pos_source  # torch.Size([num_envs, 1, 3])
     
+    object_frame = scene['object_frame']
+    object_pos = object_frame.data.target_pos_source  # torch.Size([num_envs, 1, 3])
+    
+    target_frame = scene['target_frame']
+    target_pos = target_frame.data.target_pos_source  # torch.Size([num_envs, 1, 3])
+
     with open(csv_file, 'a', newline='') as f:
         writer = csv.writer(f)
         
@@ -300,6 +310,12 @@ def log(log_dir: str, scene: InteractiveScene, step_count: int, dt: float, episo
                 header.append(f'{name}_soft_vel_limit')
             # Add end effector position columns
             header.extend(['ee_frame_pos_x', 'ee_frame_pos_y', 'ee_frame_pos_z'])
+            # Add hover target position columns
+            header.extend(['hover_target_pos_x', 'hover_target_pos_y', 'hover_target_pos_z'])
+            # Add object position columns
+            header.extend(['object_pos_x', 'object_pos_y', 'object_pos_z'])
+            # Add target position columns
+            header.extend(['target_pos_x', 'target_pos_y', 'target_pos_z'])
             writer.writerow(header)
         
         # Write data for each environment
@@ -331,6 +347,24 @@ def log(log_dir: str, scene: InteractiveScene, step_count: int, dt: float, episo
                 ee_frame_pos[env_id, 0, 0].item(),
                 ee_frame_pos[env_id, 0, 1].item(),
                 ee_frame_pos[env_id, 0, 2].item()
+            ])
+            # Add hover target positions
+            row.extend([
+                hover_target_pos[env_id, 0, 0].item(),
+                hover_target_pos[env_id, 0, 1].item(),
+                hover_target_pos[env_id, 0, 2].item()
+            ])
+            # Add object positions
+            row.extend([
+                object_pos[env_id, 0, 0].item(),
+                object_pos[env_id, 0, 1].item(),
+                object_pos[env_id, 0, 2].item()
+            ])
+            # Add target positions
+            row.extend([
+                target_pos[env_id, 0, 0].item(),
+                target_pos[env_id, 0, 1].item(),
+                target_pos[env_id, 0, 2].item()
             ])
             
             writer.writerow(row)
