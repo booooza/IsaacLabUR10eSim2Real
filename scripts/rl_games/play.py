@@ -43,6 +43,9 @@ parser.add_argument(
 )
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
 parser.add_argument("--debug", action="store_true", default=False, help="Enable debug logs.")
+parser.add_argument("--num_episodes", type=int, default=1, help="Number of episodes to run per environment.")
+parser.add_argument("--export_onnx", action="store_true", default=False, help="Export model to ONNX format.")
+parser.add_argument("--onnx_path", type=str, default=None, help="Path to save ONNX model.")
 
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
@@ -65,6 +68,7 @@ import math
 import os
 import random
 import time
+import onnx
 
 import gymnasium as gym
 import ur10e_sim2real.tasks  # noqa: F401
@@ -89,7 +93,7 @@ from isaaclab_tasks.utils.hydra import hydra_task_config
 from rl_games.common import env_configurations, vecenv
 from rl_games.common.player import BasePlayer
 from rl_games.torch_runner import Runner
-
+from scripts.rl_games.logger import PlayLogger
 
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: dict):
@@ -138,6 +142,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # set the log directory for the environment (works for all environment types)
     env_cfg.log_dir = log_dir
+    
+    # initialize the custom logger
+    logger = PlayLogger(log_dir) if args_cli.debug else None
 
     # wrap around environment for rl-games
     rl_device = agent_cfg["params"]["config"]["device"]
@@ -189,14 +196,51 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     agent: BasePlayer = runner.create_player()
     agent.restore(resume_path)
     agent.reset()
+    
+    # Export to ONNX if requested
+    if args_cli.export_onnx:
+        # Determine save path
+        if args_cli.onnx_path is not None:
+            onnx_save_path = args_cli.onnx_path
+        else:
+            onnx_save_path = os.path.join(log_dir, "exported_model.onnx")
+        
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(onnx_save_path), exist_ok=True)
+        
+        # Get a sample observation
+        sample_obs = env.reset()
+        if isinstance(sample_obs, dict):
+            sample_obs = sample_obs["obs"]
+        
+        # Convert to agent format
+        sample_obs = agent.obs_to_torch(sample_obs)
+        
+        # Export the model
+        try:
+            export_to_onnx(agent, sample_obs, onnx_save_path)
+            export_actor_to_onnx(agent, sample_obs, onnx_save_path.replace(".onnx", "_actor.onnx"))
+            print(f"[INFO] Exported model to: {onnx_save_path}")
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to export or test ONNX model: {e}")
+            import traceback
+            traceback.print_exc()
 
     dt = env.unwrapped.step_dt
+    max_episode_length = env.unwrapped.max_episode_length
 
     # reset environment
     obs = env.reset()
     if isinstance(obs, dict):
         obs = obs["obs"]
+    episodes_completed = torch.zeros(env.unwrapped.num_envs, dtype=torch.int32, device=env.unwrapped.device)
+    max_episodes = args_cli.num_episodes
     timestep = 0
+    
+    print(f"[INFO] Running {max_episodes} episode(s) per environment")
+    print(f"[INFO] Episode length: {max_episode_length} steps ({max_episode_length * dt:.1f} seconds)")
+
     # required: enables the flag for batched observations
     _ = agent.get_batch_size(obs, 1)
     # initialize RNN states if used
@@ -208,6 +252,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     #   operations such as masking that is used for multi-agent learning by RL-Games.
     while simulation_app.is_running():
         start_time = time.time()
+        # Check if all environments have completed the required number of episodes
+        if (episodes_completed >= max_episodes).all():
+            print(f"[INFO] All environments completed {max_episodes} episode(s). Exiting.")
+            break
         # run everything in inference mode
         with torch.inference_mode():
             # convert obs to agent format
@@ -217,11 +265,28 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             # env stepping
             obs, rew, dones, extras = env.step(actions)
             # logging
-            if args_cli.debug:
-                log(log_dir, env.unwrapped.scene, env.unwrapped.common_step_counter, dt, env.unwrapped.episode_length_buf)
+            #if args_cli.debug:
+                #log(log_dir, env.unwrapped.scene, env.unwrapped.common_step_counter, dt, env.unwrapped.episode_length_buf)
+
+            if args_cli.debug and logger is not None:
+                logger.log_step(
+                    env.unwrapped.scene,
+                    env.unwrapped.common_step_counter,
+                    dt,
+                    env.unwrapped.episode_length_buf,
+                    episodes_completed
+                )
 
             # perform operations for terminated episodes
             if len(dones) > 0:
+                # Count completed episodes
+                episodes_completed[dones] += 1
+                
+                # Print progress
+                for env_id in dones.nonzero(as_tuple=True)[0]:
+                    if episodes_completed[env_id] <= max_episodes:
+                        print(f"[INFO] Env {env_id.item()}: Episode {episodes_completed[env_id].item()}/{max_episodes} completed")
+                    
                 # reset rnn state for terminated episodes
                 if agent.is_rnn and agent.states is not None:
                     for s in agent.states:
@@ -237,138 +302,219 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         if args_cli.real_time and sleep_time > 0:
             time.sleep(sleep_time)
 
+    if args_cli.debug and logger is not None:
+        logger.save(overwrite=True)
+    
     # close the simulator
     env.close()
 
-def log(log_dir: str, scene: InteractiveScene, step_count: int, dt: float, episode_length_buf: torch.Tensor):
-    """Log environment information during play."""
-    csv_file = Path(log_dir) / "play_log.csv"
-    file_exists = csv_file.exists()
+def export_to_onnx(agent, obs, save_path, opset_version=11):
+    """Export the agent's model to ONNX format.
     
-    # Get robot data
-    robot = scene.articulations['robot']
-    joint_names = robot._data.joint_names
-    num_envs = robot._data.joint_pos.shape[0]
-    joint_pos = robot._data.joint_pos  # (num_envs, 8)
-    joint_pos_target = robot._data.joint_pos_target  # (num_envs, 8)
-    joint_pos_limits = robot._data.joint_pos_limits  # (num_envs, 8, 2)
-    soft_joint_pos_limits = robot._data.soft_joint_pos_limits  # (num_envs, 8, 2)
+    Args:
+        agent: The RL-Games agent/player
+        obs: Sample observation to trace the model
+        save_path: Path where to save the ONNX model
+        opset_version: ONNX opset version to use
+    """
+    print(f"[INFO] Exporting model to ONNX format...")
     
-    joint_vel = robot._data.joint_vel  # (num_envs, 8)
-    joint_vel_target = robot._data.joint_vel_target  # (num_envs, 8)
-    joint_vel_limits = robot._data.joint_vel_limits  # (num_envs, 8)
-    soft_joint_vel_limits = robot._data.soft_joint_vel_limits  # torch.Size([1, 8])
+    # Get the model from the agent
+    model = agent.model
+    model.eval()
     
-    # Calculate simulation time from step counter
-    sim_time = step_count * dt
+    # Prepare the observation
+    if isinstance(obs, dict):
+        obs_tensor = obs["obs"]
+    else:
+        obs_tensor = obs
     
-    # Get end effector data
-    ee_frame_transform = scene['ee_frame']
-    ee_frame_pos = ee_frame_transform.data.target_pos_source  # torch.Size([num_envs, 1, 3])
+    # Convert to torch tensor if needed
+    if not isinstance(obs_tensor, torch.Tensor):
+        obs_tensor = torch.from_numpy(obs_tensor)
+    
+    # Take a single observation (batch size 1) for export
+    sample_input = obs_tensor[0:1].to(agent.device)
+    
+    # RL-Games models expect a dictionary input
+    # We need to create a wrapper that converts tensor input to the expected dict format
+    class ModelWrapper(torch.nn.Module):
+        def __init__(self, model):
+            super().__init__()
+            self.model = model
         
-    # Get task data
-    hover_target_frame = scene['hover_target_frame']
-    hover_target_pos = hover_target_frame.data.target_pos_source  # torch.Size([num_envs, 1, 3])
+        def forward(self, obs):
+            # Convert tensor input to the dict format RL-Games expects
+            input_dict = {
+                'obs': obs,
+                'is_train': False  # Set to False for inference
+            }
+            output = self.model(input_dict)
+            
+            # RL-Games typically returns a dict with 'mus' (actions) and 'values'
+            if isinstance(output, dict):
+                # Return actions and values as separate outputs
+                actions = output.get('mus', output.get('actions', None))
+                values = output.get('values', None)
+                
+                if values is not None:
+                    return actions, values
+                else:
+                    return actions
+            else:
+                return output
     
-    object_frame = scene['object_frame']
-    object_pos = object_frame.data.target_pos_source  # torch.Size([num_envs, 1, 3])
+    wrapped_model = ModelWrapper(model)
     
-    target_frame = scene['target_frame']
-    target_pos = target_frame.data.target_pos_source  # torch.Size([num_envs, 1, 3])
+    # If the model is RNN, we need to handle states
+    if agent.is_rnn:
+        print("[INFO] Detected RNN model, exporting with initial states...")
+        print("[WARNING] RNN export not fully implemented, exporting without states")
+        # For now, just export the feedforward part
+    
+    print("[INFO] Exporting feedforward model...")
+    
+    try:
+        # Export with the wrapped model
+        torch.onnx.export(
+            wrapped_model,
+            sample_input,
+            save_path,
+            input_names=['obs'],
+            output_names=['actions', 'values'],
+            dynamic_axes={
+                'obs': {0: 'batch'},
+                'actions': {0: 'batch'},
+                'values': {0: 'batch'}
+            },
+            opset_version=opset_version,
+            do_constant_folding=True,
+            export_params=True
+        )
+        
+        print(f"[INFO] Model exported to: {save_path}")
+        
+        # Verify the exported model
+        try:
+            onnx_model = onnx.load(save_path)
+            onnx.checker.check_model(onnx_model)
+            print("[INFO] ONNX model verification passed!")
+            
+            # Print model info
+            print(f"[INFO] Model inputs: {[input.name for input in onnx_model.graph.input]}")
+            print(f"[INFO] Model outputs: {[output.name for output in onnx_model.graph.output]}")
+            
+        except Exception as e:
+            print(f"[WARNING] ONNX model verification failed: {e}")
+        
+    except Exception as e:
+        print(f"[ERROR] ONNX export failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+    
+    return save_path
 
-    with open(csv_file, 'a', newline='') as f:
-        writer = csv.writer(f)
+def export_actor_to_onnx(agent, obs, save_path, opset_version=11):
+    """Export only the actor/policy to ONNX format.
+    
+    Args:
+        agent: The RL-Games agent/player
+        obs: Sample observation to trace the model
+        save_path: Path where to save the ONNX model
+        opset_version: ONNX opset version to use
+    """
+    print(f"[INFO] Exporting actor/policy to ONNX format...")
+    
+    # Get the model from the agent
+    model = agent.model
+    model.eval()
+    
+    # Prepare the observation
+    if isinstance(obs, dict):
+        obs_tensor = obs["obs"]
+    else:
+        obs_tensor = obs
+    
+    # Convert to torch tensor if needed
+    if not isinstance(obs_tensor, torch.Tensor):
+        obs_tensor = torch.from_numpy(obs_tensor)
+    
+    # Take a single observation (batch size 1) for export
+    sample_input = obs_tensor[0:1].to(agent.device)
+    
+    # Create a wrapper that only returns actions
+    class ActorWrapper(torch.nn.Module):
+        def __init__(self, model):
+            super().__init__()
+            self.model = model
         
-        # Write header if new file
-        if not file_exists:
-            header = ['step', 'sim_time', 'env_id', 'episode_step']
-            # Add joint position columns
-            for name in joint_names:
-                header.append(f'{name}_pos')
-            # Add joint position target columns
-            for name in joint_names:
-                header.append(f'{name}_pos_target')
-            # Add joint velocity columns
-            for name in joint_names:
-                header.append(f'{name}_vel')
-            # Add joint velocity target columns
-            for name in joint_names:
-                header.append(f'{name}_vel_target')
-            # Add joint position limits (lower and upper)
-            for name in joint_names:
-                header.append(f'{name}_pos_limit_lower')
-                header.append(f'{name}_pos_limit_upper')
-            # Add soft joint position limits (lower and upper)
-            for name in joint_names:
-                header.append(f'{name}_soft_pos_limit_lower')
-                header.append(f'{name}_soft_pos_limit_upper')
-            # Add joint velocity limits
-            for name in joint_names:
-                header.append(f'{name}_vel_limit')
-            # Add soft joint velocity limits (lower and upper)
-            for name in joint_names:
-                header.append(f'{name}_soft_vel_limit')
-            # Add end effector position columns
-            header.extend(['ee_frame_pos_x', 'ee_frame_pos_y', 'ee_frame_pos_z'])
-            # Add hover target position columns
-            header.extend(['hover_target_pos_x', 'hover_target_pos_y', 'hover_target_pos_z'])
-            # Add object position columns
-            header.extend(['object_pos_x', 'object_pos_y', 'object_pos_z'])
-            # Add target position columns
-            header.extend(['target_pos_x', 'target_pos_y', 'target_pos_z'])
-            writer.writerow(header)
+        def forward(self, obs):
+            # Convert tensor input to the dict format RL-Games expects
+            input_dict = {
+                'obs': obs,
+                'is_train': False
+            }
+            output = self.model(input_dict)
+            
+            # Return only the actions
+            if isinstance(output, dict):
+                return output.get('mus', output.get('actions'))
+            else:
+                return output[0] if isinstance(output, (tuple, list)) else output
+    
+    wrapped_model = ActorWrapper(model)
+    
+    print("[INFO] Exporting actor network...")
+    
+    try:
+        torch.onnx.export(
+            wrapped_model,
+            sample_input,
+            save_path,
+            input_names=['obs'],
+            output_names=['actions'],
+            dynamic_axes={
+                'obs': {0: 'batch'},
+                'actions': {0: 'batch'}
+            },
+            opset_version=opset_version,
+            do_constant_folding=True,
+            export_params=True
+        )
         
-        # Write data for each environment
-        for env_id in range(num_envs):
-            row = [step_count, sim_time, env_id, episode_length_buf[env_id].item()]
+        print(f"[INFO] Actor exported to: {save_path}")
+        
+        # Verify the exported model
+        try:
+            onnx_model = onnx.load(save_path)
+            onnx.checker.check_model(onnx_model)
+            print("[INFO] ONNX model verification passed!")
             
-            # Add joint positions
-            row.extend(joint_pos[env_id].cpu().numpy().tolist())
-            # Add joint position targets
-            row.extend(joint_pos_target[env_id].cpu().numpy().tolist())
-            # Add joint velocities
-            row.extend(joint_vel[env_id].cpu().numpy().tolist())
-            # Add joint velocity targets
-            row.extend(joint_vel_target[env_id].cpu().numpy().tolist())
-            # Add joint position limits (lower, upper for each joint)
-            for joint_idx in range(len(joint_names)):
-                row.append(joint_pos_limits[env_id, joint_idx, 0].item())  # lower limit
-                row.append(joint_pos_limits[env_id, joint_idx, 1].item())  # upper limit
-            # Add soft joint position limits (lower, upper for each joint)
-            for joint_idx in range(len(joint_names)):
-                row.append(soft_joint_pos_limits[env_id, joint_idx, 0].item())  # soft lower limit
-                row.append(soft_joint_pos_limits[env_id, joint_idx, 1].item())  # soft upper limit
-            # Add joint velocity limits
-            row.extend(joint_vel_limits[env_id].cpu().numpy().tolist())
-            # Add soft joint velocity limits (symmetric, so ±soft_vel_limit)
-            row.extend(soft_joint_vel_limits[env_id].cpu().numpy().tolist())
-            # Add end effector frame positions
-            row.extend([
-                ee_frame_pos[env_id, 0, 0].item(),
-                ee_frame_pos[env_id, 0, 1].item(),
-                ee_frame_pos[env_id, 0, 2].item()
-            ])
-            # Add hover target positions
-            row.extend([
-                hover_target_pos[env_id, 0, 0].item(),
-                hover_target_pos[env_id, 0, 1].item(),
-                hover_target_pos[env_id, 0, 2].item()
-            ])
-            # Add object positions
-            row.extend([
-                object_pos[env_id, 0, 0].item(),
-                object_pos[env_id, 0, 1].item(),
-                object_pos[env_id, 0, 2].item()
-            ])
-            # Add target positions
-            row.extend([
-                target_pos[env_id, 0, 0].item(),
-                target_pos[env_id, 0, 1].item(),
-                target_pos[env_id, 0, 2].item()
-            ])
+            # Print model info
+            print(f"[INFO] Model inputs: {[input.name for input in onnx_model.graph.input]}")
+            print(f"[INFO] Model outputs: {[output.name for output in onnx_model.graph.output]}")
             
-            writer.writerow(row)
-          
+            # Get input/output shapes
+            for input_tensor in onnx_model.graph.input:
+                shape = [dim.dim_value if dim.dim_value > 0 else 'dynamic' for dim in input_tensor.type.tensor_type.shape.dim]
+                print(f"[INFO] Input '{input_tensor.name}' shape: {shape}")
+            
+            for output_tensor in onnx_model.graph.output:
+                shape = [dim.dim_value if dim.dim_value > 0 else 'dynamic' for dim in output_tensor.type.tensor_type.shape.dim]
+                print(f"[INFO] Output '{output_tensor.name}' shape: {shape}")
+            
+        except Exception as e:
+            print(f"[WARNING] ONNX model verification failed: {e}")
+        
+    except Exception as e:
+        print(f"[ERROR] ONNX export failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+    
+    return save_path
+       
 if __name__ == "__main__":
     # run the main function
     main()

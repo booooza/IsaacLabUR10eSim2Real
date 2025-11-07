@@ -34,6 +34,9 @@ parser.add_argument(
     help="Use the pre-trained checkpoint from Nucleus.",
 )
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
+parser.add_argument("--debug", action="store_true", default=False, help="Enable debug logs.")
+parser.add_argument("--num_episodes", type=int, default=1, help="Number of episodes to run per environment.")
+
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
@@ -79,6 +82,7 @@ from isaaclab_rl.rsl_rl import (
 from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
 from rsl_rl.runners import DistillationRunner, OnPolicyRunner
+from scripts.rl_games.logger import PlayLogger
 
 
 @hydra_task_config(args_cli.task, args_cli.agent)
@@ -115,6 +119,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # set the log directory for the environment (works for all environment types)
     env_cfg.log_dir = log_dir
+    
+    # initialize the custom logger
+    logger = PlayLogger(log_dir) if args_cli.debug else None
 
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
@@ -174,19 +181,46 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
 
     dt = env.unwrapped.step_dt
-
+    max_episode_length = env.unwrapped.max_episode_length
+    episodes_completed = torch.zeros(env.unwrapped.num_envs, dtype=torch.int32, device=env.unwrapped.device)
+    max_episodes = args_cli.num_episodes
+    
+    print(f"[INFO] Running {max_episodes} episode(s) per environment")
+    print(f"[INFO] Episode length: {max_episode_length} steps ({max_episode_length * dt:.1f} seconds)")
+    
     # reset environment
     obs = env.get_observations()
     timestep = 0
     # simulate environment
     while simulation_app.is_running():
         start_time = time.time()
+        # Check if all environments have completed the required number of episodes
+        if (episodes_completed >= max_episodes).all():
+            print(f"[INFO] All environments completed {max_episodes} episode(s). Exiting.")
+            break
         # run everything in inference mode
         with torch.inference_mode():
             # agent stepping
             actions = policy(obs)
             # env stepping
-            obs, _, _, _ = env.step(actions)
+            obs, rew, dones, extras= env.step(actions)
+            if args_cli.debug and logger is not None:
+                logger.log_step(
+                    env.unwrapped.scene,
+                    env.unwrapped.common_step_counter,
+                    dt,
+                    env.unwrapped.episode_length_buf,
+                    episodes_completed
+                )
+            # perform operations for terminated episodes
+            if len(dones) > 0:
+                # Count completed episodes
+                episodes_completed[dones] += 1
+                
+                # Print progress
+                for env_id in dones.nonzero(as_tuple=True)[0]:
+                    if episodes_completed[env_id] <= max_episodes:
+                        print(f"[INFO] Env {env_id.item()}: Episode {episodes_completed[env_id].item()}/{max_episodes} completed")
         if args_cli.video:
             timestep += 1
             # Exit the play loop after recording one video
@@ -197,6 +231,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         sleep_time = dt - (time.time() - start_time)
         if args_cli.real_time and sleep_time > 0:
             time.sleep(sleep_time)
+
+    if args_cli.debug and logger is not None:
+        logger.save(overwrite=True)
 
     # close the simulator
     env.close()

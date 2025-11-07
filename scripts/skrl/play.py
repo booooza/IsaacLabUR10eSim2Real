@@ -206,7 +206,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
     runner.agent.set_running_mode("eval")
 
     # reset environment
-    obs, _ = env.reset()
+    obs, extras = env.reset()
     timestep = 0
     # simulate environment
     while simulation_app.is_running():
@@ -223,7 +223,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
             else:
                 actions = outputs[-1].get("mean_actions", outputs[0])
             # env stepping
-            obs, _, _, _, _ = env.step(actions)
+            obs, reward, terminated, truncated, info = env.step(actions)
+
+            # Get reach success (per environment)
+            reach_success = info['reach_success']
+            print(f"reach_success = {reach_success}")
+
         if args_cli.video:
             timestep += 1
             # exit the play loop after recording one video
