@@ -560,7 +560,21 @@
       <geometry>
         <mesh filename="meshes/hande/finger_collision.dae" scale="1.0 1.0 1.0" />
       </geometry>
+      <surface>
+        <friction>
+          <ode>
+            <mu>1.0</mu>
+            <mu2>1.0</mu2>
+          </ode>
+        </friction>
+      </surface>
     </collision>
+    <gazebo reference="robotiq_hande_right_finger">
+      <mu1>1.2</mu1>   <!-- primary friction coefficient -->
+      <mu2>1.2</mu2>   <!-- secondary friction coefficient -->
+      <kd>1.0</kd>     <!-- damping -->
+      <material>rubber</material>
+    </gazebo>
     <inertial>
       <origin rpy="0 0 0" xyz="0 0 0" />
       <mass value="0.03804" />
@@ -579,7 +593,21 @@
       <geometry>
         <mesh filename="meshes/hande/finger_collision.dae" scale="1.0 1.0 1.0" />
       </geometry>
+      <surface>
+        <friction>
+          <ode>
+            <mu>1.0</mu>
+            <mu2>1.0</mu2>
+          </ode>
+        </friction>
+      </surface>
     </collision>
+    <gazebo reference="robotiq_hande_right_finger">
+      <mu1>1.2</mu1>   <!-- primary friction coefficient -->
+      <mu2>1.2</mu2>   <!-- secondary friction coefficient -->
+      <kd>1.0</kd>     <!-- damping -->
+      <material>rubber</material>
+    </gazebo>
     <inertial>
       <origin rpy="0 0 0" xyz="0 0 0" />
       <mass value="0.03804" />
