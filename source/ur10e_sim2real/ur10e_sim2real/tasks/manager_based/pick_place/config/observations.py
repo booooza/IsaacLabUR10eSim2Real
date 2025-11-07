@@ -84,29 +84,6 @@ class ReachStageObservationsCfg:
             params={"asset_cfg": SceneEntityCfg("hover_target_frame")},
         )
 
-        # === RELATIVE TRANSFORMS (useful for grasping) ===
-        # These are redundant, as they can be computed from the above but could help learning.
-        # tcp_to_target_rotation = ObservationTermCfg(
-        #     func=mdp.relative_rotation_from_scene_entity,
-        #     params={"asset_cfg": SceneEntityCfg("ee_target_frame")},
-        # )
-
-        # # Object Awareness: TCP rotation relative to object and target
-        # tcp_to_object_rotation = ObservationTermCfg(
-        #     func=relative_rotation_from_scene_entity,
-        #     params={"asset_cfg": SceneEntityCfg("ee_object_frame")},
-        #     # noise=GaussianNoise(mean=0.0, std=0.01),  # TODO: Vision noise
-        # )
-        
-        # # Distance to target
-        # distance_to_object = ObservationTermCfg(
-        #     func=distance_to_object,
-        #     params={
-        #         "object_cfg": SceneEntityCfg("object"),
-        #         "ee_frame_cfg": SceneEntityCfg("ee_frame"),
-        #     }
-        # )
-
         # Previous actions
         prev_actions = ObservationTermCfg(func=last_action)
         
@@ -114,6 +91,48 @@ class ReachStageObservationsCfg:
             self.enable_corruption = True
             self.concatenate_terms = True
     
+    @configclass
+    class CriticCfg(PolicyCfg):
+        """Critic observations (privileged, no noise)."""
+
+        # manipulability = ObservationTermCfg(
+        #     func=mdp.manipulability_index,
+        #     params={"asset_cfg": SceneEntityCfg("robot")}
+        # )
+        
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = True
+    
+    # Observation groups
+    policy: PolicyCfg = PolicyCfg()
+    critic: CriticCfg = CriticCfg()
+
+@configclass
+class GraspStageObservationsCfg(ReachStageObservationsCfg):
+    """Observation specifications for grasp stage."""
+    @configclass
+    class PolicyCfg(ReachStageObservationsCfg.PolicyCfg):
+        gripper_state = ObservationTermCfg(
+            func=joint_pos_rel,
+            params={
+                "asset_cfg": SceneEntityCfg("robot", joint_names=["robotiq_hande_.*_finger_joint"])
+            },
+        )
+        gripper_vel = ObservationTermCfg(
+            func=joint_vel_rel,
+            params={
+                "asset_cfg": SceneEntityCfg("robot", joint_names=["robotiq_hande_.*_finger_joint"])
+            },
+        )
+        target_position_base  = ObservationTermCfg(
+            func=relative_position_from_scene_entity,
+            params={"asset_cfg": SceneEntityCfg("target_frame")},
+        )
+
+        target_rotation_base  = None # No rotation target in grasp stage
+    
+    # Also override critic if needed
     @configclass
     class CriticCfg(PolicyCfg):
         """Critic observations (privileged, no noise)."""
@@ -126,12 +145,84 @@ class ReachStageObservationsCfg:
         def __post_init__(self):
             self.enable_corruption = False
             self.concatenate_terms = True
-    
+
     # Observation groups
     policy: PolicyCfg = PolicyCfg()
     critic: CriticCfg = CriticCfg()
 
 
+@configclass
+class LiftStageObservationsCfg:
+    """Observation specifications for lift stage - simplified for better learning."""
+    
+    @configclass
+    class PolicyCfg(ObservationGroupCfg):
+        """Actor observations (with noise) - minimal, task-relevant features."""
+        
+        # === PROPRIOCEPTION ===
+        joint_pos = ObservationTermCfg(
+            func=joint_pos_rel,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=["shoulder_.*", "elbow_.*", "wrist_.*"])},
+        )
+
+        joint_vel = ObservationTermCfg(
+            func=joint_vel_rel,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=["shoulder_.*", "elbow_.*", "wrist_.*"])},
+        )
+        
+        # === GRIPPER STATE ===
+        gripper_state = ObservationTermCfg(
+            func=joint_pos_rel,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=["robotiq_hande_left_finger_joint"])},
+        )
+        
+        # === CURRENT EE STATE ===
+        tcp_position_base = ObservationTermCfg(
+            func=relative_position_from_scene_entity,
+            params={"asset_cfg": SceneEntityCfg("ee_frame")},
+        )
+
+        tcp_rotation_base = ObservationTermCfg(
+            func=relative_rotation_from_scene_entity,
+            params={"asset_cfg": SceneEntityCfg("ee_frame")},
+        )
+        
+        # === OBJECT POSITION (minimal - just 3D position in base frame) ===
+        object_position_base = ObservationTermCfg(
+            func=relative_position_from_scene_entity,
+            params={"asset_cfg": SceneEntityCfg("object_frame")},
+            # noise=GaussianNoise(mean=0.0, std=0.01),  # Vision noise
+        )
+        object_rotation_base = ObservationTermCfg(
+            func=relative_rotation_from_scene_entity,
+            params={"asset_cfg": SceneEntityCfg("object_frame")},
+        )
+        
+        # === TARGET POSITION (where to lift the object to) ===
+        target_position_base = ObservationTermCfg(
+            func=relative_position_from_scene_entity,
+            params={"asset_cfg": SceneEntityCfg("target_frame")},  # Using final target, not hover
+        )
+
+        # === PREVIOUS ACTIONS ===
+        prev_actions = ObservationTermCfg(func=last_action)
+        
+        def __post_init__(self):
+            self.enable_corruption = True
+            self.concatenate_terms = True
+    
+    @configclass
+    class CriticCfg(PolicyCfg):
+        """Critic observations (privileged, no noise)."""
+    
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = True
+    
+    # Observation groups
+    policy: PolicyCfg = PolicyCfg()
+    critic: CriticCfg = CriticCfg()
+    
 @configclass
 class PickPlaceObservationsCfg:
     """Observation specifications with asymmetric actor-critic."""

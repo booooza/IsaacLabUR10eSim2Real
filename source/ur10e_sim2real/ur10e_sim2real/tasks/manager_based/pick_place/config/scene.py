@@ -9,6 +9,8 @@ from isaaclab.sensors import FrameTransformerCfg
 from isaaclab.markers.config import FRAME_MARKER_CFG, VisualizationMarkersCfg
 from isaaclab.markers.config import POSITION_GOAL_MARKER_CFG
 from isaaclab.sensors.frame_transformer.frame_transformer_cfg import OffsetCfg
+from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
+from isaaclab.sim.schemas.schemas_cfg import RigidBodyPropertiesCfg
 
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from isaaclab_assets import UR10e_ROBOTIQ_GRIPPER_CFG
@@ -66,20 +68,53 @@ class PickPlaceSceneCfg(InteractiveSceneCfg):
     # Object to manipulate - randomized cubes
     object = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Object",
-        spawn=sim_utils.CuboidCfg(
-            size=(0.025, 0.025, 0.025),  # Base size: 2.5cm cube, will be randomized per env
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                disable_gravity=False,
-                solver_position_iteration_count=16,
-                solver_velocity_iteration_count=1,
-                max_depenetration_velocity=5.0,
+        spawn=UsdFileCfg(
+                usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/DexCube/dex_cube_instanceable.usd",
+                scale=(0.5, 0.5, 0.5),
+                rigid_props=RigidBodyPropertiesCfg( 
+                    solver_position_iteration_count=16,
+                    solver_velocity_iteration_count=1,
+                    max_angular_velocity=1000.0,
+                    max_linear_velocity=1000.0,
+                    max_depenetration_velocity=5.0,
+                    disable_gravity=False,
+                    kinematic_enabled=False, # disable kinematics for reaching
+                ),
             ),
-            mass_props=sim_utils.MassPropertiesCfg(mass=0.1),  # Will be randomized
-            collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.8, 0.2, 0.2)),
-        ),
+        # spawn=sim_utils.MultiAssetSpawnerCfg(
+        #     assets_cfg=[
+        #         sim_utils.CuboidCfg(size=(0.05, 0.1, 0.1), physics_material=sim_utils.RigidBodyMaterialCfg(static_friction=0.5)),
+        #         sim_utils.CuboidCfg(size=(0.05, 0.05, 0.1), physics_material=sim_utils.RigidBodyMaterialCfg(static_friction=0.5)),
+        #         sim_utils.CuboidCfg(size=(0.025, 0.1, 0.1), physics_material=sim_utils.RigidBodyMaterialCfg(static_friction=0.5)),
+        #         sim_utils.CuboidCfg(size=(0.025, 0.05, 0.1), physics_material=sim_utils.RigidBodyMaterialCfg(static_friction=0.5)),
+        #         sim_utils.CuboidCfg(size=(0.025, 0.025, 0.1), physics_material=sim_utils.RigidBodyMaterialCfg(static_friction=0.5)),
+        #         sim_utils.CuboidCfg(size=(0.01, 0.1, 0.1), physics_material=sim_utils.RigidBodyMaterialCfg(static_friction=0.5)),
+        #     ],
+        #     rigid_props=sim_utils.RigidBodyPropertiesCfg(
+        #         solver_position_iteration_count=16,
+        #         solver_velocity_iteration_count=0,
+        #         disable_gravity=False,
+        #     ),
+        #     collision_props=sim_utils.CollisionPropertiesCfg(),
+        #     mass_props=sim_utils.MassPropertiesCfg(mass=0.2),
+        # ),
+        # spawn=sim_utils.CuboidCfg(
+        #     size=(0.025, 0.025, 0.025),  # Base size: 2.5cm cube, will be randomized per env
+        #     rigid_props=sim_utils.RigidBodyPropertiesCfg(
+        #         disable_gravity=False,
+        #         solver_position_iteration_count=16,
+        #         solver_velocity_iteration_count=1,
+        #         max_depenetration_velocity=5.0,
+        #     ),
+        #     physics_material=sim_utils.RigidBodyMaterialCfg(static_friction=0.5),
+        #     mass_props=sim_utils.MassPropertiesCfg(mass=0.05),  # Will be randomized
+        #     collision_props=sim_utils.CollisionPropertiesCfg(
+        #         collision_enabled=True,
+        #     ),
+        #     visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.8, 0.2, 0.2)),
+        # ),
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(0.0, -0.60, 0.0), # Center of the workspace (60cm in front of robot base)
+            pos=(0.0, -0.60, 0.015), # Center of the workspace (60cm in front of robot base)
             rot=(1, 0, 0, 0)
         ),
     )
@@ -249,4 +284,32 @@ class PickPlaceSceneCfg(InteractiveSceneCfg):
             intensity=2500.0
         ),
     )
+
+@configclass
+class LiftStageSceneCfg(PickPlaceSceneCfg):
+    """Scene configuration optimized for lift stage."""
     
+    # Override target initial position
+    target = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Target",
+        spawn=sim_utils.CuboidCfg(
+            size=(0.01, 0.01, 0.01),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                kinematic_enabled=False,
+                disable_gravity=True,
+            ),
+            collision_props=sim_utils.CollisionPropertiesCfg(
+                collision_enabled=False,  # Target shouldn't collide
+            ),
+            visual_material=sim_utils.PreviewSurfaceCfg(
+                diffuse_color=(1.0, 0.0, 0.0), 
+                opacity=1.0,
+                metallic=0.0,
+                roughness=0.5,
+            ),
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(
+            pos=(0.0, -0.45, 0.20),  # Center of the workspace at 20cm height
+            rot=(1.0, 0.0, 0.0, 0.0)
+        ),
+    )

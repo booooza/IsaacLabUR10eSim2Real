@@ -10,9 +10,13 @@ Currently implements Stage 1 (Reach) with asymmetric actor-critic observations.
 """
 
 from dataclasses import MISSING
-from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.config.actions import ReachStageActionsCfg
-from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.config.events import ReachStageEventCfg
-from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.config.rewards import ReachStageRewardsCfg
+from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.config.actions import GraspStageActionsCfg, ReachStageActionsCfg, ReachStageDeltaJointVelocityActionsCfg
+from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.config.curriculum import ReachStageCurriculumCfg
+from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.config.events import GraspStageEventCfg, ReachStageDeterministicEventCfg, ReachStageEventCfg, ReachStageRandomizeObjectOnSuccessEventCfg
+from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.config.observations import GraspStageObservationsCfg
+from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.config.rewards import GraspStageRewardsCfg, IsaacReachStageDenseRewardsCfg, IsaacReachStageHighSparseRewardsCfg, IsaacReachStageSparseRewardsCfg, LiftStageRewardsCfg, ReachStageRewardsCfg, ReachStageRewardsCfgV2, ReachStageRewardsCfgV3
+from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.config.scene import LiftStageSceneCfg
+from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.config.terminations import LiftStageTerminationsCfg, ReachStageSuccessTerminationsCfg, ReachStageTerminationsCfg, ReachStageTimeoutTerminationsCfg
 import torch
 from typing import TYPE_CHECKING
 
@@ -115,6 +119,125 @@ class PickPlaceEnvCfg(ManagerBasedRLEnvCfg):
                 ),
             },
         )
+
+# IsaacReachStageDenseRewardsCfg
+# IsaacReachStageSparseRewardsCfg
+# IsaacReachStageHighSparseRewardsCfg
+
+# ReachStageTimeoutTerminationsCfg
+# ReachStageSuccessTerminationsCfg
+
+# ReachStageEventCfg
+# ReachStageRandomizeObjectOnSuccessEventCfg
+
+@configclass
+class ReachStageEnvCfg(PickPlaceEnvCfg):
+    scene: PickPlaceSceneCfg = PickPlaceSceneCfg(num_envs=512, env_spacing=2.5, replicate_physics=True)
+    
+    # MDP components
+    actions: ReachStageActionsCfg = ReachStageActionsCfg()
+    observations: ReachStageObservationsCfg = ReachStageObservationsCfg()
+    events: ReachStageEventCfg = ReachStageEventCfg()
+    rewards: ReachStageRewardsCfgV3 = ReachStageRewardsCfgV3()
+    terminations: ReachStageTerminationsCfg = ReachStageTerminationsCfg()
+    curriculum: ReachStageCurriculumCfg = ReachStageCurriculumCfg()
+    
+    def __post_init__(self):
+        """Post initialization."""
+        # General settings
+        self.seed = 42
+
+        self.decimation = 2  # 62.5 Hz policy (125/2)
+        self.sim.dt = 1 / 125  # 125 Hz physics
+        self.episode_length_s = 5.0  # 312 steps (5.0s * 62.5 Hz)
+
+        # Target settings for sim-to-real transfer
+        # self.decimation = 1  # 125 Hz control frequency
+        # self.episode_length_s = 5.0  # ~625 steps
+        # self.sim.dt = 1.0 / 125.0  # 125 Hz 8 ms physics step
+        # self.sim.render_interval = self.decimation
+
+# Terminate on Timeout
+@configclass
+class ReachTimeout3EnvCfg(ReachStageEnvCfg):  # Sparse w=10, Timeout
+    rewards: IsaacReachStageHighSparseRewardsCfg = IsaacReachStageHighSparseRewardsCfg()
+    events: ReachStageEventCfg = ReachStageEventCfg()
+    terminations: ReachStageTimeoutTerminationsCfg = ReachStageTimeoutTerminationsCfg()
+
+# Terminate on Timeout
+@configclass
+class ReachStageDeltaJointVelocityActionsEnvCfg(ReachStageEnvCfg):
+    actions: ReachStageDeltaJointVelocityActionsCfg = ReachStageDeltaJointVelocityActionsCfg()
+    rewards: ReachStageRewardsCfgV3 = ReachStageRewardsCfgV3()
+    events: ReachStageEventCfg = ReachStageEventCfg()
+    terminations: ReachStageTimeoutTerminationsCfg = ReachStageTimeoutTerminationsCfg()
+    curriculum = None
+
+@configclass
+class ReachStagePlayEnvCfg(ReachStageEnvCfg):
+    """Configuration for reach environment during play/testing."""
+    events: ReachStageDeterministicEventCfg = ReachStageDeterministicEventCfg()
+    terminations: ReachStageTimeoutTerminationsCfg = ReachStageTimeoutTerminationsCfg()
+    
+    def __post_init__(self):
+        # Run parent post-init
+        super().__post_init__()
+        
+        self.seed = 999
+
+        # Viewer settings
+        self.viewer.eye = (1.5, -2.5, 1.5)
+        self.viewer.lookat = (0.0, 0.0, 0.0)
+        
+        # Longer episodes for testing
+        # episode_length_steps = ceil(episode_length_s / (decimation_rate * physics_time_step))
+        self.episode_length_s = 5.0
+        
+        # Use only 1 environment for teleop
+        self.scene.num_envs = 1
+
+@configclass
+class ReachStagePlayLoopEnvCfg(ReachStageEnvCfg):
+    """Configuration for reach environment during play/testing."""
+    events: ReachStageRandomizeObjectOnSuccessEventCfg = ReachStageRandomizeObjectOnSuccessEventCfg()
+    terminations: ReachStageTimeoutTerminationsCfg = ReachStageTimeoutTerminationsCfg()
+    
+    def __post_init__(self):
+        # Run parent post-init
+        super().__post_init__()
+        
+        self.seed = 999
+
+        # Viewer settings
+        self.viewer.eye = (1.5, -2.5, 1.5)
+        self.viewer.lookat = (0.0, 0.0, 0.0)
+        
+        # Longer episodes for testing
+        # episode_length_steps = ceil(episode_length_s / (decimation_rate * physics_time_step))
+        self.episode_length_s = 15.0
+        
+        # Use only 1 environment for teleop
+        self.scene.num_envs = 1
+
+@configclass
+class GraspStageEnvCfg(PickPlaceEnvCfg):
+    # MDP components
+    actions: GraspStageActionsCfg = GraspStageActionsCfg()
+    observations: GraspStageObservationsCfg = GraspStageObservationsCfg()
+    events: GraspStageEventCfg = GraspStageEventCfg()
+    rewards: GraspStageRewardsCfg = GraspStageRewardsCfg()
+    terminations: PickPlaceTerminationsCfg = PickPlaceTerminationsCfg()
+    curriculum: PickPlaceCurriculumCfg = PickPlaceCurriculumCfg()
+
+@configclass
+class LiftStageEnvCfg(PickPlaceEnvCfg):
+    scene: LiftStageSceneCfg = LiftStageSceneCfg(num_envs=512, env_spacing=2.5, replicate_physics=True)
+    actions: GraspStageActionsCfg = GraspStageActionsCfg()
+    observations: GraspStageObservationsCfg = GraspStageObservationsCfg()
+    events: GraspStageEventCfg = GraspStageEventCfg()
+    rewards: LiftStageRewardsCfg = LiftStageRewardsCfg()
+    terminations: LiftStageTerminationsCfg = LiftStageTerminationsCfg()
+    curriculum: PickPlaceCurriculumCfg = PickPlaceCurriculumCfg()
 
 @configclass
 class PickPlaceEnvPlayCfg(PickPlaceEnvCfg):

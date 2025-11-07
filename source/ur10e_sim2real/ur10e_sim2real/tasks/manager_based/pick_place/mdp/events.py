@@ -3,10 +3,42 @@ import torch
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import sample_uniform
-from isaaclab.utils.math import sample_uniform, quat_from_euler_xyz
-from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.mdp.rewards import reach_goal_bonus
+from isaaclab.utils.math import sample_uniform, quat_from_euler_xyz, quat_mul
+from isaaclab.assets.rigid_object import RigidObject
+from isaaclab.assets.articulation import Articulation
+from source.ur10e_sim2real.ur10e_sim2real.tasks.manager_based.pick_place.mdp.rewards import reach_goal_bonus, success_bonus
 from isaaclab.envs.mdp import reset_root_state_uniform
 
+def initialize_curriculum(
+    env: ManagerBasedRLEnv,
+    env_ids: torch.Tensor,
+):
+    """Initialize per-env success tracking."""
+    # e.g. 0 = hover, 1 = pick, 2 = place
+    env.stage = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+
+def update_curriculum(
+    env: ManagerBasedRLEnv,
+    env_ids: torch.Tensor,
+):
+    """Initialize per-env success tracking."""
+    # Reach success
+    source_frame_cfg = SceneEntityCfg("ee_frame")
+    target_frame_cfg = SceneEntityCfg("hover_target_frame")
+    position_threshold = REACH_POSITION_SUCCESS_THRESHOLD
+    rotation_threshold = REACH_ROTATION_SUCCESS_THRESHOLD
+    combined_success = success_bonus(
+        env, source_frame_cfg, target_frame_cfg, 
+        position_threshold, rotation_threshold
+    )
+    success_mask = combined_success > 0.5
+
+    # Transition only those that succeeded and are still in stage 0
+    stage_0_mask = env.stage[env_ids] == 0
+    transition_mask = success_mask & stage_0_mask
+
+    env.stage[env_ids[transition_mask]] = 1  # move to next stage
+        
 def reset_object_on_success(
     env: ManagerBasedRLEnv,
     env_ids: torch.Tensor,
@@ -21,7 +53,7 @@ def reset_object_on_success(
     """Reset object when reach goal is achieved.
     """    
     # Check which envs succeeded
-    success = reach_goal_bonus(env, source_frame_cfg, target_frame_cfg, position_threshold, rotation_threshold)
+    success = success_bonus(env, source_frame_cfg, target_frame_cfg, position_threshold, rotation_threshold)
     success_env_ids = (success > 0.5).nonzero(as_tuple=False).squeeze(-1)
     
     if len(success_env_ids) > 0:        
@@ -42,7 +74,7 @@ def update_success_metrics(
     rotation_threshold: float = REACH_ROTATION_SUCCESS_THRESHOLD,
 ):
     """Track metrics for non-terminating multi-success reaching task."""
-    combined_success = reach_goal_bonus(
+    combined_success = success_bonus(
         env, source_frame_cfg, target_frame_cfg, 
         position_threshold, rotation_threshold
     )
@@ -80,6 +112,7 @@ def update_success_metrics(
     env.extras["log"]["success_rate"] = success_mask.float().mean().item()
     env.extras["log"]["total_successes"] = metrics["total_successes"]
     env.extras["log"]["successes_per_episode"] = metrics["last_successes_per_episode"]
+    env.extras["log"]["stage_mean"] = env.stage.float().mean().item()
 
 
 def reset_success_counters(
@@ -123,6 +156,44 @@ def reset_articulation_to_default(
         articulation_asset.set_joint_velocity_target(default_joint_vel, env_ids=env_ids)
         articulation_asset.write_joint_state_to_sim(default_joint_pos, default_joint_vel, env_ids=env_ids)
 
+def reset_root_state_predefined(
+    env: ManagerBasedRLEnv,
+    env_ids: torch.Tensor,
+    poses: list[dict[str, float]],
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+):
+    """Reset asset root state to predefined poses.
+    
+    Similar to reset_root_state_uniform, but uses predefined poses instead of sampling.
+    Each env_id is mapped to poses[env_id % len(poses)].
+    """
+    asset: RigidObject | Articulation = env.scene[asset_cfg.name]
+    root_states = asset.data.default_root_state[env_ids].clone()
+    
+    num_resets = len(env_ids)
+    pose_values = torch.zeros((num_resets, 6), device=asset.device)
+    
+    # Map each env_id to its predefined pose
+    for i, env_id in enumerate(env_ids):
+        pose_idx = env_id.item() % len(poses)
+        pose = poses[pose_idx]
+        pose_values[i] = torch.tensor([
+            pose.get("x", 0.0), pose.get("y", 0.0), pose.get("z", 0.0),
+            pose.get("roll", 0.0), pose.get("pitch", 0.0), pose.get("yaw", 0.0),
+        ], device=asset.device)
+    
+    # Apply poses (same as reset_root_state_uniform, but with fixed values)
+    positions = root_states[:, 0:3] + env.scene.env_origins[env_ids] + pose_values[:, 0:3]
+    orientations_delta = quat_from_euler_xyz(
+        pose_values[:, 3], pose_values[:, 4], pose_values[:, 5]
+    )
+    orientations = quat_mul(root_states[:, 3:7], orientations_delta)
+    velocities = torch.zeros((num_resets, 6), device=asset.device)
+    
+    # Write to simulation
+    asset.write_root_pose_to_sim(torch.cat([positions, orientations], dim=-1), env_ids=env_ids)
+    asset.write_root_velocity_to_sim(velocities, env_ids=env_ids)
+    
 def log_custom_metrics(
     env: ManagerBasedRLEnv,
     env_ids: torch.Tensor,
