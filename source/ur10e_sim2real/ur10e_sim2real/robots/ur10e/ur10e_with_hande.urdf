@@ -633,7 +633,7 @@
     <child link="robotiq_hande_right_finger" />
     <axis xyz="-1 0 0" />
     <limit effort="130" lower="0" upper="0.025" velocity="0.15" />
-    <mimic joint="robotiq_hande_left_finger_joint" multiplier="1" offset="0" />
+    <!-- <mimic joint="robotiq_hande_left_finger_joint" multiplier="1" offset="0" /> -->
   </joint>
   <joint name="robotiq_hande_end_joint" type="fixed">
     <origin rpy="0 0 0" xyz="0 0 0.14550000000000002" />
