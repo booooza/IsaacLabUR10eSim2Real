@@ -1,0 +1,89 @@
+params:
+  seed: 42
+
+  # environment wrapper clipping
+  env:
+    # added to the wrapper
+    clip_observations: 100.0
+    # can make custom wrapper?
+    clip_actions: 1.0
+
+  algo:
+    name: sac
+
+  model:
+    name: soft_actor_critic
+
+  network:
+    name: soft_actor_critic
+    separate: True
+    log_std_bounds: [-5, 2]
+    space:
+      continuous:
+        mu_activation: None
+        sigma_activation: None
+
+        mu_init:
+          name: default
+        sigma_init:
+          name: const_initializer
+          val: -3
+        fixed_sigma: False
+        
+    mlp:
+      units: [256, 256]
+      activation: relu
+      d2rl: False
+
+      initializer:
+        name: default
+      regularizer:
+        name: None
+
+  load_checkpoint: False # flag which sets whether to load the checkpoint
+  load_path: '' # path to the checkpoint to load
+
+  config:
+    name: reach_direct
+    env_name: rlgpu
+    device: 'cuda:0'
+    device_name: 'cuda:0'
+    multi_gpu: False
+
+    # SAC-specific required parameters
+    normalize_input: True
+    num_actors: -1  # Set from script based on num_envs
+    
+    # SAC hyperparameters (from SACAgent.__init__)
+    gamma: 0.99
+    critic_tau: 0.005  # Soft update coefficient for target network
+    batch_size: 512  # Samples per update from replay buffer
+    
+    # Learning rates
+    actor_lr: 0.0003
+    critic_lr: 0.0003
+    alpha_lr: 0.0003  # Temperature parameter learning rate
+    
+    # Temperature (entropy) settings
+    init_alpha: 0.2  # Initial temperature
+    learnable_temperature: True
+    target_entropy_coef: 1.0  # Multiplier for target entropy
+    
+    # Replay buffer
+    replay_buffer_size: 1000000
+    num_warmup_steps: 1000  # Random exploration epochs before training
+    
+    # Episode settings
+    num_steps_per_episode: 1  # Steps before update (SAC updates after each step)
+    max_env_steps: 1000  # Max steps per episode (for timeout detection)
+    
+    # Training
+    max_epochs: 15000  # Much higher than PPO since each epoch is shorter
+    max_frames: -1
+    save_best_after: 100
+    save_frequency: 100
+    print_stats: True
+    
+    # Reward shaping
+    reward_shaper:
+      scale_value: 1.0
