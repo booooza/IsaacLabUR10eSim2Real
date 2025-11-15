@@ -11,6 +11,7 @@ from isaaclab.assets import AssetBaseCfg, RigidObjectCfg, ArticulationCfg
 from isaaclab.sensors import FrameTransformerCfg
 from isaaclab.markers.config import FRAME_MARKER_CFG, VisualizationMarkersCfg
 from isaaclab.markers.config import POSITION_GOAL_MARKER_CFG
+from isaaclab.sensors import ContactSensorCfg
 from isaaclab.sensors.frame_transformer.frame_transformer_cfg import OffsetCfg
 from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
 from isaaclab.sim.schemas.schemas_cfg import RigidBodyPropertiesCfg
@@ -161,7 +162,12 @@ class GraspSceneCfg(ReachSceneCfg):
                 ),
         },
     )
-
+    contact_sensor = ContactSensorCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/robotiq_hande_.*_finger",  # Regex for finger links
+        update_period=0.0,  # Update every physics step
+        debug_vis=True,      # Visualize contacts in simulator
+        history_length=1     # Store latest contact data
+    )
     # Object to manipulate - randomized cubes
     object = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Object",

@@ -127,6 +127,11 @@ class GraspEnv(ReachEnv):
         
         # Process arm actions
         processed_arm_actions = joint_offset + arm_actions * (joint_scale / 2)
+        processed_arm_actions = torch.clamp(
+            processed_arm_actions,
+            self.lower_joint_pos_limits[self.joint_ids],
+            self.upper_joint_pos_limits[self.joint_ids]
+        )
         
         # Process gripper action (map from [-1, 1] to actual width, then split between fingers)
         gripper_max_width = 0.05
@@ -210,6 +215,15 @@ class GraspEnv(ReachEnv):
         current_gripper_width = gripper_positions.sum(dim=-1)  # (num_envs,)
         current_width_normalized = 2.0 * (current_gripper_width / gripper_max_width) - 1.0
         current_width_tensor = current_width_normalized.unsqueeze(-1)  # (num_envs, 1)
+
+        # Gripper contact detection
+        contact_forces = self.scene._sensors['contact_sensor']._data.net_forces_w # (num_envs, 2, 3)
+        normal_forces = contact_forces[:, :, 1].abs()
+        min_normal_force = torch.min(normal_forces, dim=-1).values # both fingers need y-forces
+        is_gripping = min_normal_force > 10.0 # Force threshold (nm)
+
+        if is_gripping.any():
+            print(f"🛗 Gripping in {is_gripping.sum().item()} envs.")
         
         obs = torch.cat(
             (
@@ -268,20 +282,25 @@ class GraspEnv(ReachEnv):
         )
 
         minimal_height = 0.04 # 4cm above table = lifted
+        max_height = 0.20 # 20cm above table
         object_height = object_pos[:, 2]
         table_height = 0.015  # From your init state
         lift_height = object_height - table_height
+        lift_reward = torch.clamp(lift_height / 0.10, 0, 1)
+        # Linear reward: 0 when on table, increases linearly with height
+        # Clipped to max_height to prevent unbounded rewards
+        # Returns value in meters: e.g., 0.10m lift → reward = 0.10
+        lift_reward = torch.clamp(lift_height, min=0.0, max=max_height)
         is_lifted = torch.where(lift_height > minimal_height, 1.0, 0.0)
         
         envs_lifted = lift_height > minimal_height
         if envs_lifted.any():
             print(f"🛗 Lifting in {envs_lifted.sum().item()} envs.")
 
-        # Linear L2 distance target to obj
+        # Distance target to obj
         distance_obj_target_l2 = torch.norm(target_pos - object_pos, dim=1)
-        # rewarded if the object is lifted above the threshold
-        distance_obj_target_tanh = is_lifted * (1 - torch.tanh(distance_obj_target_l2 / 0.3))
-        distance_obj_target_tanh_fine = is_lifted * (1 - torch.tanh(distance_obj_target_l2 / 0.05))
+        distance_obj_target_tanh =  1 - torch.tanh(distance_obj_target_l2 / 0.3)
+        distance_obj_target_tanh_fine =  1 - torch.tanh(distance_obj_target_l2 / 0.05)
         
         # --- Penalties ---
         action_l2 = torch.sum(torch.square(self.actions), dim=1)
