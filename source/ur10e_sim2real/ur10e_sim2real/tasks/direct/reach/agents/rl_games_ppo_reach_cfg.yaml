@@ -3,10 +3,8 @@ params:
 
   # environment wrapper clipping
   env:
-    # added to the wrapper
-    clip_observations: 100.0
-    # can make custom wrapper?
-    clip_actions: 1.0
+    # clip_observations: 100.0
+    clip_actions: 3.14159
 
   algo:
     name: a2c_continuous
@@ -27,7 +25,7 @@ params:
           name: default
         sigma_init:
           name: const_initializer
-          val: 0
+          val: -1.5
         fixed_sigma: True
     mlp:
       units: [256, 128, 64]
@@ -77,4 +75,4 @@ params:
     critic_coef: 2
     clip_value: True
     seq_length: 4
-    bounds_loss_coef: 0.0001
+    bounds_loss_coef: 0.001 # from 0.0001

@@ -22,7 +22,7 @@ from isaaclab.markers.config import FRAME_MARKER_CFG, VisualizationMarkersCfg
 from isaaclab.markers import SPHERE_MARKER_CFG, VisualizationMarkers
 from isaaclab.sensors import FrameTransformerCfg
 from isaaclab.utils.math import subtract_frame_transforms
-
+from isaaclab.utils.math import quat_apply
 
 
 class ReachEnv(DirectRLEnv):
@@ -33,17 +33,40 @@ class ReachEnv(DirectRLEnv):
         super().__init__(cfg, render_mode, **kwargs)
         self.robot = self.scene.articulations["robot"]
         self.joint_ids, _ = self.robot.find_joints(self.cfg.joint_names)
-        self.lower_joint_pos_limits = self.robot.data.soft_joint_pos_limits[0, :, 0]
-        self.upper_joint_pos_limits = self.robot.data.soft_joint_pos_limits[0, :, 1]
+        
+        # Define joint limits
+        if self.cfg.action_type == "position":
+            self.joint_limits_lower = self.robot.data.joint_pos_limits[:, self.joint_ids, 0].clone()
+            self.joint_limits_upper = self.robot.data.joint_pos_limits[:, self.joint_ids, 1].clone()
+        elif self.cfg.action_type == "velocity":
+            self.joint_limits_lower = -self.robot.data.joint_vel_limits[:, self.joint_ids].clone()
+            self.joint_limits_upper = self.robot.data.joint_vel_limits[:, self.joint_ids].clone()
+            
+        self.action_scale = torch.tensor(self.cfg.action_scale, device=self.device)
+        self.joint_ranges = (self.joint_limits_upper - self.joint_limits_lower) * self.action_scale
+        
         self.actions = torch.zeros(
             self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device
         )
         self.previous_actions = torch.zeros(
             self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device
         )
+        
+        # Define per-joint offset (center positions)
+        if self.cfg.use_default_offset:
+            if self.cfg.action_type == "position":
+                self.joint_offset = self.robot.data.default_joint_pos[:, self.joint_ids].clone()
+            if self.cfg.action_type == "velocity":
+                self.joint_offset = self.robot.data.default_joint_vel[:, self.joint_ids].clone()    
+        else:
+            # Midpoint of limits
+            self.joint_offset = (self.joint_limits_lower + self.joint_limits_upper) / 2  
 
         self.pos_w = torch.zeros((self.num_envs, 3), device=self.device)
         self.quat_w = torch.tensor([[1., 0., 0., 0.]], device=self.device).repeat(self.num_envs, 1)
+
+        # maximum xyz reach
+        self.max_reach = torch.tensor([1.3, 1.3, 1.3], device=self.device)
 
         # initialize goal marker
         self.goal_markers = VisualizationMarkers(self.cfg.target_cfg)
@@ -92,20 +115,13 @@ class ReachEnv(DirectRLEnv):
         """
         self.previous_actions = self.actions.clone()
         self.actions = actions.clone()
-
-        # Define per-joint scale (joint ranges)
-        joint_scale = torch.tensor(self.cfg.action_scale, device=actions.device)
-        # Define per-joint offset (center positions)
-        if self.cfg.use_default_offset:
-            if self.cfg.action_type == "position":
-                joint_offset = self.robot.data.default_joint_pos[:, self.joint_ids].clone()
-            if self.cfg.action_type == "velocity":
-                joint_offset = self.robot.data.default_joint_vel[:, self.joint_ids].clone()
-        else:
-            joint_offset = torch.zeros_like(joint_scale, device=actions.device)
-
-        # Apply affine transform
-        self.processed_actions = joint_offset + self.actions * (joint_scale / 2)
+        
+        # Clamp to joint limits
+        self.processed_actions = torch.clamp(
+            self.actions,
+            min=self.joint_limits_lower,
+            max=self.joint_limits_upper
+        )
 
     def _apply_action(self):
         """Apply actions to the simulator.
@@ -127,21 +143,8 @@ class ReachEnv(DirectRLEnv):
             The observations for the environment.
         """
         # Get raw joint positions
-        joint_positions_raw = self.robot.data.joint_pos[:, self.joint_ids]  # (num_envs, 6)
-        joint_scale = torch.tensor(self.cfg.action_scale, device=self.device)
-        if self.cfg.use_default_offset:
-            if self.cfg.action_type == "position":
-                joint_offset = self.robot.data.default_joint_pos[:, self.joint_ids].clone()
-            if self.cfg.action_type == "velocity":
-                joint_offset = self.robot.data.default_joint_vel[:, self.joint_ids].clone()
-        else:
-            joint_offset = torch.zeros_like(joint_scale, device=self.device)
-        joint_positions = (joint_positions_raw - joint_offset) / (joint_scale / 2.0)
-
+        joint_positions = self.robot.data.joint_pos[:, self.joint_ids]  # (num_envs, 6)
         joint_velocities = self.robot.data.joint_vel[:, self.joint_ids]  # (num_envs, 6)  joint velocities
-        joint_vel_limits = self.robot.data.joint_vel_limits[:, self.joint_ids]
-        joint_velocities = torch.clamp(joint_velocities / joint_vel_limits, -1.0, 1.0)
-        
         ee_pos = self.scene['ee_frame'].data.target_pos_source[..., 0, :]  # (num_envs, 3) end-effector position xyz
         ee_quat = self.scene['ee_frame'].data.target_quat_source[..., 0, :]  # (num_envs, 4) end-effector orientation quat
         target_pos = self.target_pos  # (num_envs, 3 target position xyz
@@ -183,20 +186,20 @@ class ReachEnv(DirectRLEnv):
         Returns:
             The rewards for the environment. Shape is (num_envs,).
         """
-        source_frame = self.scene['ee_frame']
-        source_pos = source_frame.data.target_pos_w[..., 0, :3]
-        source_quat = source_frame.data.target_quat_w[..., 0, :]
+        ee_frame = self.scene['ee_frame']
+        ee_pos = ee_frame.data.target_pos_w[..., 0, :3]
+        ee_quat = ee_frame.data.target_quat_w[..., 0, :]
         target_pos = self.target_pos_w
         target_quat = self.target_quat
 
         # --- Dense ---
         # Linear L2 distance reward over the full workspace
-        distance_l2 = torch.norm(target_pos - source_pos, p=2, dim=-1)
+        distance_l2 = torch.norm(target_pos - ee_pos, p=2, dim=-1)
         # Tanh reward for precision near the goal
         std = 0.2 # start guiding with tanh from 20 cm
         distance_tanh = 1.0 - torch.tanh(distance_l2 / std)
         # Orientation error as the angular error between input quaternions in radians
-        orientation_error = quat_error_magnitude(target_quat, source_quat)
+        orientation_error = quat_error_magnitude(target_quat, ee_quat)
         reach_success: torch.Tensor = ((distance_l2 < self.cfg.reach_pos_threshold) &
                  (orientation_error < self.cfg.reach_rot_threshold))
         
@@ -208,6 +211,7 @@ class ReachEnv(DirectRLEnv):
         joint_vel_l2 = torch.sum(torch.square(self.robot.data.joint_vel[:, self.joint_ids]), dim=1)
         joint_pos_limit = self._joint_pos_limits(self.joint_ids)
         joint_vel_limit = self._joint_vel_limits(self.joint_ids, soft_ratio=1.0)
+        min_link_distance = self._minimum_link_distance(min_dist=0.1)
 
         # --- Sparse ---
         # Update consecutive_successes
@@ -222,6 +226,7 @@ class ReachEnv(DirectRLEnv):
             torch.ones_like(reach_success),
             torch.zeros_like(reach_success)
         )
+        
 
         # --- Total weighted reward ---
         reward = (
@@ -235,6 +240,7 @@ class ReachEnv(DirectRLEnv):
             # Safety limits
             self.cfg.joint_pos_limit_w * joint_pos_limit +
             self.cfg.joint_vel_limit_w * joint_vel_limit +
+            self.cfg.min_link_distance_w * min_link_distance +
             # Success bonus
             self.cfg.success_bonus_w * success_bonus
         )
@@ -245,15 +251,80 @@ class ReachEnv(DirectRLEnv):
         self.distance_l2 = distance_l2
         self.orientation_error = orientation_error
         
-        self.extras["log"]["Metrics/success_rate"] = reach_success.float().mean().item()
-        self.extras["log"]["Metrics/stable_success_rate"] = stable_success.float().mean().item()
+        self.extras["Metrics/success_rate"] = reach_success.float().mean().item()
+        self.extras["Metrics/stable_success_rate"] = stable_success.float().mean().item()
+        self.extras["Debug/distance_mean"] = distance_l2.mean().item()
+        self.extras["Debug/distance_mode"] = distance_l2.mode()
+        self.extras["Debug/distance_min"] = distance_l2.min().item()
+        self.extras["Debug/distance_max"] = distance_l2.max().item()
+        self.extras["Debug/action_mean"] = self.actions.abs().mean().item()
+        self.extras["Debug/action_max"] = self.actions.abs().max().item()
+        self.extras["Debug/reward"] = reward.mean().item()
 
         if reach_success.any():
             print(f"Reached goal pose for {reach_success.sum().item()} envs.")
         if stable_success.any():
             print(f"Reached stable goal pose for {stable_success.sum().item()} envs.")
 
+        if self.common_step_counter % 1000 == 0:
+            env_id = 0
+            
+            # Current state
+            ee_pos = self.scene['ee_frame'].data.target_pos_w[env_id, 0, :3]
+            target_pos = self.target_pos_w[env_id]  # (num_envs, 3 target position xyz
+            joint_pos = self.robot.data.joint_pos[env_id, self.joint_ids]
+            
+            print(f"\n=== Env {env_id} ===")
+            print(f"EE pos: {ee_pos}")
+            print(f"Target pos: {target_pos}")
+            print(f"Distance: {torch.norm(target_pos - ee_pos).item():.4f}m")
+            print(f"Joint pos: {joint_pos}")
+            print(f"Joint pos (deg): {joint_pos * 180 / 3.14159}")
+            
+            # Check if any joint near limits
+            limits = self.robot.data.soft_joint_pos_limits[env_id, self.joint_ids]
+            margin_lower = joint_pos - limits[:, 0]
+            margin_upper = limits[:, 1] - joint_pos
+            print(f"Margin to lower limits: {margin_lower}")
+            print(f"Margin to upper limits: {margin_upper}")
+            
+            # Check if any joint is limiting progress
+            if (margin_lower < 0.2).any() or (margin_upper < 0.2).any():
+                print("⚠️ JOINT NEAR LIMIT!")
+
         return reward
+
+    def _is_danger_of_clamping(self,):
+        # Error C403A0: Danger of clamping between the robot lower arm and tool
+        # https://forum.universal-robots.com/t/error-c403a0-danger-of-clamping-between-the-robot-lower-arm-and-tool/16142
+        forearm_idx = self.robot.find_bodies('forearm_link')[0][0]
+        flange_idx = self.robot.find_bodies('flange')[0][0]
+        forearm_pos = self.robot.data.body_link_pos_w[:, forearm_idx]  # (N,3)
+        flange_pos  = self.robot.data.body_link_pos_w[:, flange_idx]   # (N,3)
+        forearm_quat = self.robot.data.body_quat_w[:, forearm_idx]
+        # Cylinder around forearm: radius = 0.0375 m
+        # Sphere around flange: radius = 0.0375 m
+        # Violation when distance < 0.028 m
+        FOREARM_R = 0.0375
+        FLANGE_R  = 0.0375
+        SAFE_DIST = 0.028
+        threshold = 0.0375 + 0.0375 + 0.028
+
+        axis_local = torch.tensor([0, 0, 1], dtype=torch.float32, device=forearm_pos.device).expand_as(forearm_pos)
+        axis_world = quat_apply(forearm_quat, axis_local)
+        # Project flange center onto cylinder axis
+
+        v = flange_pos - forearm_pos
+        proj_len = torch.sum(v * axis_world, dim=-1, keepdim=True)
+        proj = forearm_pos + proj_len * axis_world
+
+        # Distance between flange center and cylinder axis
+        dist = torch.norm(flange_pos - proj, dim=-1)
+
+        threshold = (FOREARM_R + FLANGE_R + SAFE_DIST)
+        protective_stop_c403a0 = dist < threshold
+    
+        return protective_stop_c403a0
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute and return the done flags for the environment.
@@ -264,8 +335,26 @@ class ReachEnv(DirectRLEnv):
         """
         # Episode timeout
         time_out = self.episode_length_buf >= self.max_episode_length - 1
+        
+        lower = self.robot.data.joint_pos_limits[:, self.joint_ids, 0]
+        upper = self.robot.data.joint_pos_limits[:, self.joint_ids, 1]
+        # Joint limit violation
+        joint_post_limit_violation = ((self.robot.data.joint_pos[:, self.joint_ids] < lower) |
+                                 (self.robot.data.joint_pos[:, self.joint_ids] > upper)).any(dim=1)
+        # Abnormal joint velocities
+        joint_vel_limit_violation = (self.robot.data.joint_vel.abs() > (self.robot.data.joint_vel_limits * 2)).any(dim=1)
+        # Minimum link distance violation
+        minimum_link_distance_violation = self._minimum_link_distance(min_dist=0.05).abs() > 0
+        
+        died = joint_post_limit_violation | joint_vel_limit_violation | minimum_link_distance_violation
+        
+        if died.any():
+            print(f"Episode terminated due to safety limit violation in {died.sum().item()} envs.")
+            self.extras["Termination/joint_pos_limit_violation"] = joint_post_limit_violation.sum().item()
+            self.extras["Termination/joint_vel_limit_violation"] = joint_vel_limit_violation.sum().item()
+            self.extras["Termination/minimum_link_distance_violation"] = minimum_link_distance_violation.sum().item()
 
-        return False, time_out
+        return died, time_out
 
     def _set_debug_vis_impl(self, debug_vis: bool):
         """Set debug visualization into visualization objects.
@@ -296,7 +385,8 @@ class ReachEnv(DirectRLEnv):
         super()._reset_idx(env_ids)
         self._log_episode_stats(env_ids)
         self._reset_target_pose(env_ids)
-        self._reset_articulation(env_ids)
+        # self._reset_articulation(env_ids)
+        self.__reset_joints_by_offset(env_ids, position_range=(-1.0, 1.0))
         self._reset_episode_stats()
 
     def _joint_pos_limits(self, joint_ids: list) -> torch.Tensor:
@@ -317,13 +407,11 @@ class ReachEnv(DirectRLEnv):
         if violations.any():
             num_violations = violations.sum().item()
             # Log statistics
-            self.extras["log"]["Violations/joint_pos_count"] = num_violations
-            self.extras["log"]["Violations/joint_pos_mean"] = out_of_limits[violations].mean().item()
-            self.extras["log"]["Violations/joint_pos_max"] = out_of_limits.max().item()
-            
-            # Print warning only for real violations
-            print(f"⚠️  Joint position limit violations in {num_violations}/{self.num_envs} envs "
-                f"(max excess: {out_of_limits.max().item():.4f} rad)")
+            self.extras["Violations/joint_pos_count"] = num_violations
+            self.extras["Violations/joint_pos_mean"] = out_of_limits[violations].mean().item()
+            self.extras["Violations/joint_pos_max"] = out_of_limits.max().item()            
+            # print(f"⚠️  Joint position limit violations in {num_violations}/{self.num_envs} envs "
+            #     f"(max excess: {out_of_limits.max().item():.4f} rad)")
         
         return torch.sum(out_of_limits, dim=1)
 
@@ -338,15 +426,59 @@ class ReachEnv(DirectRLEnv):
         
         if violations.any():
             num_violations = violations.sum().item()
-            self.extras["log"]["Violations/joint_vel_count"] = num_violations
-            self.extras["log"]["Violations/joint_vel_mean"] = out_of_limits_clip[violations].mean().item()
-            self.extras["log"]["Violations/joint_vel_max"] = out_of_limits_clip.max().item()
-            
-            # Comment out the print - monitor via logs instead
+            self.extras["Violations/joint_vel_count"] = num_violations
+            self.extras["Violations/joint_vel_mean"] = out_of_limits_clip[violations].mean().item()
+            self.extras["Violations/joint_vel_max"] = out_of_limits_clip.max().item()            
             # print(f"⚠️  Joint velocity limit violations...")
         
         return torch.sum(out_of_limits_clip, dim=1)
 
+    def _minimum_link_distance(
+        self, min_dist=0.10,
+        safe_links=["shoulder_link", "upper_arm_link", "forearm_link",
+                    "wrist_1_link", "wrist_2_link", "wrist_3_link", "flange"]
+    ):
+
+        link_idxs = self.robot.find_bodies(safe_links)[0]
+        pos = self.robot.data.body_link_pos_w[:, link_idxs]   # (N, K, 3)
+        N, K, _ = pos.shape
+
+        diff = pos[:, :, None, :] - pos[:, None, :, :]
+        dist = torch.norm(diff, dim=-1)            # (N, K, K)
+
+        # self distances
+        mask = torch.eye(K, dtype=torch.bool, device=pos.device)
+
+        # mask adjacent pairs
+        adj = torch.zeros((K, K), dtype=torch.bool, device=pos.device)
+        for i in range(K - 1):
+            adj[i, i+1] = True
+            adj[i+1, i] = True
+
+        # combine masks
+        mask = mask | adj
+
+        dist_masked = dist.masked_fill(mask, float('inf'))
+
+        violations = dist_masked < min_dist
+        per_env_violation = violations.any(dim=(1, 2))
+        num_violations_each_env = violations.sum(dim=(1, 2))
+
+        if per_env_violation.any():
+            num_envs_violating = per_env_violation.sum().item()
+
+            # statistics only on violating environments
+            violating_dists = dist_masked[violations]
+
+            self.extras["Violations/link_dist_env_count"] = num_envs_violating
+            self.extras["Violations/link_dist_mean"] = violating_dists.mean().item()
+            self.extras["Violations/link_dist_min"] = violating_dists.min().item()
+            self.extras["Violations/link_dist_max"] = violating_dists.max().item()
+            self.extras["Violations/link_dist_total_pairs"] = violations.sum().item()
+
+        # penalty = number of violating pairs
+        return num_violations_each_env.float()
+    
     def _action_rate_limit(self, joint_ids: list, action_diff: torch.Tensor, threshold_ratio: float = 0.1,
     ) -> torch.Tensor:
         """Penalize action rate changes exceeding a threshold ratio of joint velocity limits.
@@ -389,6 +521,45 @@ class ReachEnv(DirectRLEnv):
         self.target_pos_w[env_ids] = torch_utils.quat_apply(base_quat_w, self.target_pos[env_ids]) + base_pos_w
         self.target_quat_w[env_ids] = torch_utils.quat_mul(base_quat_w, self.target_quat[env_ids])
 
+    def __reset_joints_by_offset(
+        self,
+        env_ids: torch.Tensor,
+        position_range: tuple[float, float] = (0.0, 0.0),
+        velocity_range: tuple[float, float] = (0.0, 0.0),
+    ):
+        """Reset the robot joints with offsets around the default position and velocity by the given ranges.
+
+        This function samples random values from the given ranges and biases the default joint positions and velocities
+        by these values. The biased values are then set into the physics simulation.
+        """
+        # extract the used quantities (to enable type-hinting)
+        asset: Articulation = self.robot
+
+        # cast env_ids to allow broadcasting
+        if self.joint_ids != slice(None):
+            iter_env_ids = env_ids[:, None]
+        else:
+            iter_env_ids = env_ids
+
+        # get default joint state
+        joint_pos = asset.data.default_joint_pos[iter_env_ids, self.joint_ids].clone()
+        joint_vel = asset.data.default_joint_vel[iter_env_ids, self.joint_ids].clone()
+
+        # bias these values randomly
+        joint_pos += math_utils.sample_uniform(*position_range, joint_pos.shape, joint_pos.device)
+        joint_vel += math_utils.sample_uniform(*velocity_range, joint_vel.shape, joint_vel.device)
+
+        # clamp joint pos to limits
+        joint_pos_limits = asset.data.soft_joint_pos_limits[iter_env_ids, self.joint_ids]
+        joint_pos = joint_pos.clamp_(joint_pos_limits[..., 0], joint_pos_limits[..., 1])
+
+        # clamp joint vel to limits
+        joint_vel_limits = asset.data.soft_joint_vel_limits[iter_env_ids, self.joint_ids]
+        joint_vel = joint_vel.clamp_(-joint_vel_limits, joint_vel_limits)
+
+        # set into the physics simulation
+        asset.write_joint_state_to_sim(joint_pos, joint_vel, joint_ids=self.joint_ids, env_ids=env_ids)
+        
     def _reset_articulation(self, env_ids):
         # reset articulation assets to_default
         for articulation_asset in self.scene.articulations.values():
@@ -407,13 +578,13 @@ class ReachEnv(DirectRLEnv):
             articulation_asset.write_joint_state_to_sim(default_joint_pos, default_joint_vel, env_ids=env_ids)
 
     def _log_episode_stats(self, env_ids):
-        self.extras["log"]["time_out"] = torch.count_nonzero(self.reset_time_outs[env_ids]).item()
-        self.extras["log"]["died"] = torch.count_nonzero(self.reset_terminated[env_ids]).item()
-        self.extras["log"]["Episode/reward"] = self.episode_reward.mean().item()
-        self.extras["log"]["Episode/success"] = self.episode_success.float().mean().item()
-        self.extras["log"]["Episode/consecutive_successes"] = self.consecutive_successes.float().mean().item()
-        self.extras["log"]["Episode/distance_l2"] = self.distance_l2.mean().item()
-        self.extras["log"]["Episode/orientation_error"] = self.orientation_error.mean().item()
+        self.extras["Termination/time_out"] = torch.count_nonzero(self.reset_time_outs[env_ids]).item()
+        self.extras["Termination/died"] = torch.count_nonzero(self.reset_terminated[env_ids]).item()
+        self.extras["Stats/reward"] = self.episode_reward.mean().item()
+        self.extras["Stats/success"] = self.episode_success.float().mean().item()
+        self.extras["Stats/consecutive_successes"] = self.consecutive_successes.float().mean().item()
+        self.extras["Stats/distance_l2"] = self.distance_l2.mean().item()
+        self.extras["Stats/orientation_error"] = self.orientation_error.mean().item()
 
     def _reset_episode_stats(self):
         self.episode_reward = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
