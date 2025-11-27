@@ -39,7 +39,7 @@ class GraspSceneCfg(ReachSceneCfg):
             # Joint drive configuration
             joint_drive=sim_utils.UrdfConverterCfg.JointDriveCfg(
                 drive_type="force",
-                target_type="position",
+                target_type="velocity",
                 gains=sim_utils.UrdfConverterCfg.JointDriveCfg.PDGainsCfg(
                     # If None, the stiffness is set to the value parsed from the URDF file.
                     stiffness=None,
@@ -53,7 +53,7 @@ class GraspSceneCfg(ReachSceneCfg):
                 max_depenetration_velocity=5.0,
             ),
             articulation_props=sim_utils.ArticulationRootPropertiesCfg(
-                enabled_self_collisions=False,
+                enabled_self_collisions=True,
                 # https://docs.isaacsim.omniverse.nvidia.com/latest/robot_setup_tutorials/tutorial_configure_manipulator.html
                 solver_position_iteration_count=64,
                 solver_velocity_iteration_count=4,
@@ -90,56 +90,56 @@ class GraspSceneCfg(ReachSceneCfg):
                 joint_names_expr=["shoulder_pan_joint"],
                 effort_limit_sim=330.0, # Size 4: 330 Nm [1]
                 velocity_limit_sim=2.0944,  # 120 deg/s [2]
-                stiffness=50.0,
-                damping=5.0,
+                stiffness=0.0,
+                damping=625.0,
                 friction=0.0,
                 armature=0.0,
             ),
             "shoulder_lift": ImplicitActuatorCfg(
-                    joint_names_expr=["shoulder_lift_joint"],
-                    effort_limit_sim=330.0, # Size 4: 330 Nm [1]
-                    velocity_limit_sim=2.0944,  # 120 deg/s [2]
-                    stiffness=40.0,
-                    damping=4.0,
-                    friction=0.0,
-                    armature=0.0,
-                ),
+                joint_names_expr=["shoulder_lift_joint"],
+                effort_limit_sim=330.0, # Size 4: 330 Nm [1]
+                velocity_limit_sim=2.0944,  # 120 deg/s [2]
+                stiffness=0.0,
+                damping=625.0,
+                friction=0.0,
+                armature=0.0,
+            ),
             "elbow": ImplicitActuatorCfg(
-                    joint_names_expr=["elbow_joint"],
-                    effort_limit_sim=150.0, # Size 3: 150 Nm [1]
-                    velocity_limit_sim=3.1416,  # 180 deg/s [2]
-                    stiffness=50.0,
-                    damping=5.0,
-                    friction=0.0,
-                    armature=0.0,
-                ),
+                joint_names_expr=["elbow_joint"],
+                effort_limit_sim=150.0, # Size 3: 150 Nm [1]
+                velocity_limit_sim=3.1416,  # 180 deg/s [2]
+                stiffness=0.0,
+                damping=625.0,
+                friction=0.0,
+                armature=0.0,
+            ),
             "wrist_1": ImplicitActuatorCfg(
-                    joint_names_expr=["wrist_1_joint"],
-                    effort_limit_sim=54.0, # Size 2: 54 Nm [1]
-                    velocity_limit_sim=3.1416,  # 180 deg/s [2]
-                    stiffness=60.0,
-                    damping=6.0,
-                    friction=0.0,
-                    armature=0.0,
-                ),
+                joint_names_expr=["wrist_1_joint"],
+                effort_limit_sim=54.0, # Size 2: 54 Nm [1]
+                velocity_limit_sim=3.1416,  # 180 deg/s [2]
+                stiffness=0.0,
+                damping=625.0,
+                friction=0.0,
+                armature=0.0,
+            ),
             "wrist_2": ImplicitActuatorCfg(
-                    joint_names_expr=["wrist_2_joint"],
-                    effort_limit_sim=54.0, # Size 2: 54 Nm [1]
-                    velocity_limit_sim=3.1416,  # 180 deg/s [2]
-                    stiffness=50.0,
-                    damping=5.0,
-                    friction=0.0,
-                    armature=0.0,
-                ),
+                joint_names_expr=["wrist_2_joint"],
+                effort_limit_sim=54.0, # Size 2: 54 Nm [1]
+                velocity_limit_sim=3.1416,  # 180 deg/s [2]
+                stiffness=0.0,
+                damping=625.0,
+                friction=0.0,
+                armature=0.0,
+            ),
             "wrist_3": ImplicitActuatorCfg(
-                    joint_names_expr=["wrist_3_joint"],
-                    effort_limit_sim=54.0, # Size 2: 54 Nm [1]
-                    velocity_limit_sim=3.1416,  # 180 deg/s [2]
-                    stiffness=50.0,
-                    damping=5.0,
-                    friction=0.0,
-                    armature=0.0,
-                ),
+                joint_names_expr=["wrist_3_joint"],
+                effort_limit_sim=54.0, # Size 2: 54 Nm [1]
+                velocity_limit_sim=3.1416,  # 180 deg/s [2]
+                stiffness=0.0,
+                damping=625.0,
+                friction=0.0,
+                armature=0.0,
+            ),
             "gripper_left": ImplicitActuatorCfg(
                     joint_names_expr=["robotiq_hande_left_finger_joint"],
                     effort_limit_sim=185.0, # 20–185 N per finger ​[4]

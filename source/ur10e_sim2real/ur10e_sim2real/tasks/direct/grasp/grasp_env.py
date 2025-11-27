@@ -43,6 +43,11 @@ class GraspEnv(ReachEnv):
 
         self.lower_joint_pos_limits = self.robot.data.soft_joint_pos_limits[0, :, 0]
         self.upper_joint_pos_limits = self.robot.data.soft_joint_pos_limits[0, :, 1]
+
+        gripper_limits = self.robot.data.joint_pos_limits[:, self.gripper_joint_ids, :]  # (num_envs, 2, 2)
+        self.gripper_max_width = gripper_limits[0, 0, 1].item()
+        self.gripper_default_width = self.robot.data.default_joint_pos[0, self.gripper_joint_ids].sum().item()
+
         self.actions = torch.zeros(
             self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device
         )
@@ -65,6 +70,8 @@ class GraspEnv(ReachEnv):
         self.target_quat_w = torch.zeros((self.num_envs, 4), device=self.device)
         self.target_quat_w[:, 0] = 1.0 
 
+        self.obj_width = 0.03
+
         # add handle for debug visualization (this is set to a valid handle inside set_debug_vis)
         self.set_debug_vis(self.cfg.debug_vis)
 
@@ -72,15 +79,6 @@ class GraspEnv(ReachEnv):
         self._reset_episode_stats()
         if "log" not in self.extras:
             self.extras["log"] = dict()
-
-        # DEBUG: Print actual joint properties
-        print("\n=== GRIPPER JOINT DEBUG ===")
-        print(f"Gripper joint IDs: {self.gripper_joint_ids}")
-        print(f"Stiffness: {self.robot.data.joint_stiffness[0, self.gripper_joint_ids]}")
-        print(f"Damping: {self.robot.data.joint_damping[0, self.gripper_joint_ids]}")
-        print(f"Effort limits: {self.robot.data.joint_effort_limits[0, self.gripper_joint_ids]}")
-        print(f"Velocity limits: {self.robot.data.joint_vel_limits[0, self.gripper_joint_ids]}")
-        print("===========================\n")
 
     """
     Implementation-specific functions.
@@ -111,28 +109,13 @@ class GraspEnv(ReachEnv):
         # Split actions into arm (6) and gripper (1)
         arm_actions = self.actions[:, :6]  # (num_envs, 6)
         gripper_action = self.actions[:, 6:7]  # (num_envs, 1)
-        
-        # Process arm joint actions
-        joint_scale = torch.tensor(self.cfg.action_scale[:6], device=actions.device)
-        
-        if self.cfg.use_default_offset:
-            if self.cfg.action_type == "position":
-                joint_offset = self.robot.data.default_joint_pos[:, self.joint_ids].clone()
-            elif self.cfg.action_type == "velocity":
-                joint_offset = self.robot.data.default_joint_vel[:, self.joint_ids].clone()
-            else:
-                joint_offset = torch.zeros_like(joint_scale, device=actions.device)
-        else:
-            joint_offset = torch.zeros_like(joint_scale, device=actions.device)
-        
-        # Process arm actions
-        processed_arm_actions = joint_offset + arm_actions * (joint_scale / 2)
+
         processed_arm_actions = torch.clamp(
-            processed_arm_actions,
-            self.lower_joint_pos_limits[self.joint_ids],
-            self.upper_joint_pos_limits[self.joint_ids]
+            arm_actions,
+            min=self.joint_limits_lower,
+            max=self.joint_limits_upper
         )
-        
+
         # Process gripper action (map from [-1, 1] to actual width, then split between fingers)
         gripper_max_width = 0.05
         # Map action from [-1, 1] to [0, gripper_max_width]
@@ -151,46 +134,23 @@ class GraspEnv(ReachEnv):
         )  # (num_envs, 8)
 
     def _apply_action(self):
-
         """Apply actions to the simulator.
 
         This function is responsible for applying the actions to the simulator. It is called at each
         physics time-step.
         """
-        # Combine all joint IDs (6 arm + 2 gripper)
-        all_joint_ids = self.joint_ids + self.gripper_joint_ids
-        if self.cfg.action_type == "effort":
-            self.robot.set_joint_effort_target(self.processed_actions, joint_ids=all_joint_ids)
-        if self.cfg.action_type == "position":
-            self.robot.set_joint_position_target(self.processed_actions, joint_ids=all_joint_ids)
-        if self.cfg.action_type == "velocity":
-            self.robot.set_joint_velocity_target(self.processed_actions, joint_ids=all_joint_ids)
+        # Arm control: velocity control
+        self.robot.set_joint_velocity_target(self.processed_actions[:, :6], joint_ids=self.joint_ids)
+        # Gripper control: position control
+        self.robot.set_joint_position_target(self.processed_actions[:, 6:], joint_ids=self.gripper_joint_ids)
 
     def _get_observations(self) -> VecEnvObs:
         """Compute and return the observations for the environment.
         Returns:
             The observations for the environment.
         """        
-        # Get raw joint positions (6 arm joints only)
-        joint_positions_raw = self.robot.data.joint_pos[:, self.joint_ids]  # (num_envs, 6)
-        joint_scale = torch.tensor(self.cfg.action_scale, device=self.device)
-        
-        if self.cfg.use_default_offset:
-            if self.cfg.action_type == "position":
-                joint_offset = self.robot.data.default_joint_pos[:, self.joint_ids].clone()
-            elif self.cfg.action_type == "velocity":
-                joint_offset = self.robot.data.default_joint_vel[:, self.joint_ids].clone()
-            else:
-                joint_offset = torch.zeros_like(joint_scale, device=self.device)
-        else:
-            joint_offset = torch.zeros_like(joint_scale, device=self.device)
-        
-        joint_positions = (joint_positions_raw - joint_offset) / (joint_scale / 2.0)
-        
-        # Joint velocities
-        joint_velocities = self.robot.data.joint_vel[:, self.joint_ids]  # (num_envs, 6)
-        joint_vel_limits = self.robot.data.joint_vel_limits[:, self.joint_ids]
-        joint_velocities = torch.clamp(joint_velocities / joint_vel_limits, -1.0, 1.0)
+        joint_positions = self.robot.data.joint_pos[:, self.joint_ids]  # (num_envs, 6)
+        joint_velocities = self.robot.data.joint_vel[:, self.joint_ids]  # (num_envs, 6)  joint velocities
         
         # End-effector pose
         ee_pos = self.scene['ee_frame'].data.target_pos_source[..., 0, :]  # (num_envs, 3)
@@ -223,19 +183,19 @@ class GraspEnv(ReachEnv):
         is_gripping = min_normal_force > 10.0 # Force threshold (nm)
 
         if is_gripping.any():
-            print(f"🛗 Gripping in {is_gripping.sum().item()} envs.")
-        
+            print(f"🗜️ Gripping in {is_gripping.sum().item()} envs ({is_gripping.sum().item() / self.num_envs * 100}%).")
+         
         obs = torch.cat(
             (
-                joint_positions,          # (num_envs, 6) [-1, 1]
-                joint_velocities,         # (num_envs, 6) [-1, 1]
-                obj_pos,                   # (num_envs, 3)
-                obj_quat,                  # (num_envs, 4)
-                target_pos,               # (num_envs, 3)
-                target_quat,              # (num_envs, 4)
+                joint_positions,          # (num_envs, 6) - arm state
+                joint_velocities,         # (num_envs, 6) - arm motion
+                obj_pos,                   # (num_envs, 3) - object position
+                obj_quat,                  # (num_envs, 4) - object orientation
+                target_pos,               # (num_envs, 3) - target position 
+                target_quat,              # (num_envs, 4) - goal orientation  
                 current_width_tensor,     # (num_envs, 1) [-1, 1]
                 target_width_tensor,      # (num_envs, 1) [-1, 1]
-                self.previous_actions,    # (num_envs, 7)
+                self.previous_actions,    # (num_envs, 7) - history
             ),
             dim=-1,
         )
@@ -268,13 +228,11 @@ class GraspEnv(ReachEnv):
 
         gripper_positions = self.robot.data.joint_pos[:, self.gripper_joint_ids]
         current_gripper_width = gripper_positions.sum(dim=-1)
-        target_width = 0.03
-        gripper_max_width = 0.05
-        grip_width_l2 = torch.abs(current_gripper_width - target_width)
+        grip_width_l2 = torch.abs(current_gripper_width - self.obj_width)
         std = 0.010  # start guiding with tanh from 10mm
         grip_width_tanh = 1.0 - torch.tanh(grip_width_l2 / std)
         # Only reward gripper closing when close to object
-        close_to_object = distance_ee_obj_l2 < target_width / 2  # Within 1.5cm (assuming cube)
+        close_to_object = distance_ee_obj_l2 < self.obj_width / 2  # Within 1.5cm (assuming cube)
         grip_width_reward = torch.where(
             close_to_object,
             grip_width_tanh,
@@ -286,16 +244,14 @@ class GraspEnv(ReachEnv):
         object_height = object_pos[:, 2]
         table_height = 0.015  # From your init state
         lift_height = object_height - table_height
-        lift_reward = torch.clamp(lift_height / 0.10, 0, 1)
-        # Linear reward: 0 when on table, increases linearly with height
-        # Clipped to max_height to prevent unbounded rewards
-        # Returns value in meters: e.g., 0.10m lift → reward = 0.10
-        lift_reward = torch.clamp(lift_height, min=0.0, max=max_height)
+        # Linear reward: 0 when on table, increases linearly with height until 1 when at max_height
+        # Normalized to max_height to prevent unbounded rewards
+        lift_reward = torch.clamp(lift_height / max_height, min=0.0, max=1.0)
         is_lifted = torch.where(lift_height > minimal_height, 1.0, 0.0)
         
         envs_lifted = lift_height > minimal_height
         if envs_lifted.any():
-            print(f"🛗 Lifting in {envs_lifted.sum().item()} envs.")
+            print(f"🛗 Lifting in {envs_lifted.sum().item()} envs ({envs_lifted.sum().item() / self.num_envs * 100}%).")
 
         # Distance target to obj
         distance_obj_target_l2 = torch.norm(target_pos - object_pos, dim=1)
@@ -310,6 +266,7 @@ class GraspEnv(ReachEnv):
         joint_vel_l2 = torch.sum(torch.square(self.robot.data.joint_vel[:, self.joint_ids]), dim=1)
         joint_pos_limit = self._joint_pos_limits(all_joint_ids)
         joint_vel_limit = self._joint_vel_limits(all_joint_ids, soft_ratio=1.0)
+        min_link_distance = self._minimum_link_distance(min_dist=0.1)
 
         # --- Sparse ---        
         grasp_success = (is_lifted > 0.5) & (distance_obj_target_l2 < 0.1)
@@ -320,13 +277,14 @@ class GraspEnv(ReachEnv):
             1.0 * grip_width_reward + 
             16.0 * distance_obj_target_tanh + 
             5.0 * distance_obj_target_tanh_fine +
-            15 * is_lifted +
+            5 * lift_reward +
             # Regularization penalties
             self.cfg.action_l2_w * action_l2 +
             self.cfg.action_rate_l2_w * action_rate_l2 +
             # Safety limits
             self.cfg.joint_pos_limit_w * joint_pos_limit +
-            self.cfg.joint_vel_limit_w * joint_vel_limit
+            self.cfg.joint_vel_limit_w * joint_vel_limit +
+            self.cfg.min_link_distance_w * min_link_distance
             # Success bonus
         )
 
@@ -336,23 +294,22 @@ class GraspEnv(ReachEnv):
         self.distance_l2 = distance_ee_obj_l2
         self.target_l2 = distance_obj_target_l2
         self.grip_width_l2 = grip_width_l2
-        self.lift_height = self.lift_height
+        self.lift_height = lift_height
 
         self.extras["log"]["success_rate"] = grasp_success.float().mean().item()
 
         if grasp_success.any():
-            print(f"Grasp success for {grasp_success.sum().item()} envs.")
+            print(f"🎉 Grasp success for {grasp_success.sum().item()} envs ({grasp_success.sum().item() / self.num_envs * 100}%).")
 
         return reward
 
     def _reset_idx(self, env_ids: Sequence[int] | None):
-        print("reset")
         if env_ids is None:
             env_ids = self.robot._ALL_INDICES
         super()._reset_idx(env_ids)
         self._log_episode_stats(env_ids)
         self._reset_target_pose(env_ids)
-        self._reset_articulation(env_ids)
+        # self._reset_articulation(env_ids)
         # self._reset_rigid_objects(env_ids)
         # add "yaw": (-3.14, 3.14),
         self._reset_object_uniform(env_ids, self.scene.rigid_objects['object'], pose_range={"x": (-0.1, 0.1), "y": (-0.1, 0.1)}, velocity_range={})
@@ -360,9 +317,9 @@ class GraspEnv(ReachEnv):
 
     def _log_episode_stats(self, env_ids):
         super()._log_episode_stats(env_ids)
-        self.extras["log"]["target_l2"] = self.target_l2.mean().item()
-        self.extras["log"]["grip_width_l2"] = self.grip_width_l2.mean().item()
-        self.extras["log"]["lift_height"] = self.lift_height.mean().item()
+        self.extras["log"]["Episode/target_l2"] = self.target_l2.mean().item()
+        self.extras["log"]["Episode/grip_width_l2"] = self.grip_width_l2.mean().item()
+        self.extras["log"]["Episode/lift_height"] = self.lift_height.mean().item()
 
     def _reset_episode_stats(self):
         super()._reset_episode_stats()

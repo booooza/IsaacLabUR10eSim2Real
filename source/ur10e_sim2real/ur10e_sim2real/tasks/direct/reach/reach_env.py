@@ -226,23 +226,20 @@ class ReachEnv(DirectRLEnv):
             torch.ones_like(reach_success),
             torch.zeros_like(reach_success)
         )
-        
-
         # --- Total weighted reward ---
         reward = (
             # Task rewards
-            self.cfg.distance_tanh_w * distance_tanh +
             self.cfg.distance_l2_w * distance_l2 +
-            self.cfg.orientation_error_w * orientation_error +
+            self.cfg.orientation_error_w * orientation_error
             # Regularization penalties
-            self.cfg.action_l2_w * action_l2 +
-            self.cfg.action_rate_l2_w * action_rate_l2 +
+            # self.cfg.action_l2_w * action_l2 +
+            # self.cfg.action_rate_l2_w * action_rate_l2 +
             # Safety limits
-            self.cfg.joint_pos_limit_w * joint_pos_limit +
-            self.cfg.joint_vel_limit_w * joint_vel_limit +
-            self.cfg.min_link_distance_w * min_link_distance +
+            # self.cfg.joint_pos_limit_w * joint_pos_limit +
+            # self.cfg.joint_vel_limit_w * joint_vel_limit +
+            # self.cfg.min_link_distance_w * min_link_distance +
             # Success bonus
-            self.cfg.success_bonus_w * success_bonus
+            # self.cfg.success_bonus_w * success_bonus
         )
 
         # --- Logging ---
@@ -339,22 +336,22 @@ class ReachEnv(DirectRLEnv):
         lower = self.robot.data.joint_pos_limits[:, self.joint_ids, 0]
         upper = self.robot.data.joint_pos_limits[:, self.joint_ids, 1]
         # Joint limit violation
-        joint_post_limit_violation = ((self.robot.data.joint_pos[:, self.joint_ids] < lower) |
+        joint_pos_limit_violation = ((self.robot.data.joint_pos[:, self.joint_ids] < lower) |
                                  (self.robot.data.joint_pos[:, self.joint_ids] > upper)).any(dim=1)
         # Abnormal joint velocities
         joint_vel_limit_violation = (self.robot.data.joint_vel.abs() > (self.robot.data.joint_vel_limits * 2)).any(dim=1)
         # Minimum link distance violation
         minimum_link_distance_violation = self._minimum_link_distance(min_dist=0.05).abs() > 0
-        
-        died = joint_post_limit_violation | joint_vel_limit_violation | minimum_link_distance_violation
+
+        died = joint_pos_limit_violation | joint_vel_limit_violation | minimum_link_distance_violation
         
         if died.any():
-            print(f"Episode terminated due to safety limit violation in {died.sum().item()} envs.")
-            self.extras["Termination/joint_pos_limit_violation"] = joint_post_limit_violation.sum().item()
+            # print(f"Episode terminated due to safety limit violation in {died.sum().item()} envs.")
+            self.extras["Termination/joint_pos_limit_violation"] = joint_pos_limit_violation.sum().item()
             self.extras["Termination/joint_vel_limit_violation"] = joint_vel_limit_violation.sum().item()
             self.extras["Termination/minimum_link_distance_violation"] = minimum_link_distance_violation.sum().item()
 
-        return died, time_out
+        return False, time_out
 
     def _set_debug_vis_impl(self, debug_vis: bool):
         """Set debug visualization into visualization objects.
@@ -385,8 +382,10 @@ class ReachEnv(DirectRLEnv):
         super()._reset_idx(env_ids)
         self._log_episode_stats(env_ids)
         self._reset_target_pose(env_ids)
-        # self._reset_articulation(env_ids)
-        self.__reset_joints_by_offset(env_ids, position_range=(-1.0, 1.0))
+        if self.cfg.randomize_joints:
+            self.__reset_joints_by_offset(env_ids, position_range=(-1.0, 1.0))
+        else:
+            self._reset_articulation(env_ids)
         self._reset_episode_stats()
 
     def _joint_pos_limits(self, joint_ids: list) -> torch.Tensor:

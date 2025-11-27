@@ -17,7 +17,7 @@ from isaaclab.envs.mdp.actions import JointAction, JointEffortAction, JointVeloc
 
 import gymnasium as gym
 import numpy as np
-from source.ur10e_sim2real.ur10e_sim2real.tasks.direct.grasp.scene import GraspSceneCfg
+from source.ur10e_sim2real.ur10e_sim2real.tasks.direct.grasp.grasp_scene import GraspSceneCfg
 from source.ur10e_sim2real.ur10e_sim2real.tasks.direct.reach.reach_env_cfg import ReachEnvCfg
 
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
@@ -27,31 +27,33 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 @configclass
 class GraspEnvCfg(ReachEnvCfg):
     # - spaces definition
-    action_space = gym.spaces.Box(low=-1, high=1, shape=(7,), dtype=np.float32)
+    action_space = gym.spaces.Box(
+        low=np.array([-2.0944, -2.0944, -3.14159, -3.14159, -3.14159, -3.14159, -1]), 
+        high=np.array([2.0944, 2.0944, 3.14159, 3.14159, 3.14159, 3.14159, 1]), 
+        shape=(7,), dtype=np.float32
+    )
     observation_space = gym.spaces.Box(
         low=np.array([
-            -1, -1, -1, -1, -1, -1, # 6 joint positions default pos normalized
-            -1, # 1 gripper positions default normalized
-            -1, -1, -1, -1, -1, -1, # 6 joint velocities limit normalized
-            -1, # 1 gripper velocity limit normalized
-            -2000, -2000, -2000, # 3 ee position xyz
-            -1, -1, -1, -1, # 4 ee orientation quat
-            -2000, -2000, -2000, # 3 target position xyz
+            -6.28319, -6.28319, -6.28319, -6.28319, -6.28319, -6.28319, # 6 joint positions
+            -2.0944, -2.0944, -3.14159, -3.14159, -3.14159, -3.14159, # 6 joint velocities
+            -1300, -1300, -1300, # 3 object position xyz
+            -1, -1, -1, -1, # 4 object orientation quat
+            -1300, -1300, -1300, # 3 target position xyz
             -1, -1, -1, -1, # 4 target orientation quat
+            -1, # 1 gripper position (-1 fully closed)
             -1, # 1 target width gripper max width normalized
-            -1, -1, -1, -1, -1, -1 # 6 previous actions
+            -2.0944, -2.0944, -3.14159, -3.14159, -3.14159, -3.14159, -1 # 7 previous actions
         ]),
         high=np.array([
-            1, 1, 1, 1, 1, 1, # 6 joint positions default pos normalized
-            1, # 1 gripper positions default normalized
-            1, 1, 1, 1, 1, 1, # 6 joint velocities limit normalized
-            1, # 1 gripper velocity limit normalized
-            2000, 2000, 2000, # 3 ee position xyz
-            1, 1, 1, 1, # 4 ee orientation quat
-            2000, 2000, 2000, # 3 target position xyz
+            6.28319, 6.28319, 6.28319, 6.28319, 6.28319, 6.28319, # 6 joint positions
+            2.0944, 2.0944, 3.14159, 3.14159, 3.14159, 3.14159, # 6 joint velocities
+            1300, 1300, 1300, # 3 object position xyz
+            1, 1, 1, 1, # 4 object orientation quat
+            1300, 1300, 1300, # 3 target position xyz
             1, 1, 1, 1, # 4 target orientation quat
+            1, # 1 gripper positions (+1 fully open)
             1, # 1 target width gripper max width normalized
-            1, 1, 1, 1, 1, 1 # 6 previous actions
+            2.0944, 2.0944, 3.14159, 3.14159, 3.14159, 3.14159, 1 # 7 previous actions
         ]), 
         shape=(35,), dtype=np.float64
     )
@@ -64,20 +66,23 @@ class GraspEnvCfg(ReachEnvCfg):
 
     # config
     # UR10e arm joints
-    action_scale = [0.5, 0.5, 0.5, 0.8, 0.8, 0.8]  # Shoulder/elbow: ±0.25 rad range per step, Wrist joints: ±0.4 rad range per step
+    #     action_scale = [1.0, 1.0, 1.0, 1.5, 1.5, 1.5]
+
+    action_scale = [0.5, 0.5, 0.5, 0.8, 0.8, 0.8]  # Shoulder/elbow: ±0.25 rad range per step, Wrist joints: ±0.4 rad range per step    
     use_default_offset = True
-    action_type = "position"
+    action_type = "velocity"
     reach_pos_threshold = 0.02 # 2 cm
-    reach_rot_threshold = 0.2 # 11.4592 deg
+    reach_rot_threshold = 0.1 # 5.73 deg
     reach_pos_w = 1.0
     reach_rot_w = 1.0
     reach_success_w = 10.0
-    success_bonus_stable_steps = 10 # 10*(1/125) = (~80 ms)
+    success_bonus_stable_steps = 5 # 5*(1/125) = (~40 ms)
 
     # reward weights
-    distance_tanh_w = 1.0
-    
+    distance_tanh_w = 0.1
     distance_l2_w = -0.2
+    orientation_error_w = -0.1
+    
     grip_width_tanh_w = 0.1
     grip_width_l2_w = -0.2
     lift_reward_w = 2.0
@@ -87,6 +92,7 @@ class GraspEnvCfg(ReachEnvCfg):
     action_rate_l2_w = -0.005
     joint_pos_limit_w = -1.0
     joint_vel_limit_w = -1.0
+    min_link_distance_w = -1.0
     success_bonus_w = 10.0
 
     # target 
@@ -100,7 +106,7 @@ class GraspEnvCfg(ReachEnvCfg):
         }
     )
     
-    viewer = ViewerCfg(eye = (2.5, 2.5, 2.5), lookat = (0.5, 0.0, 0.5))
+    viewer = ViewerCfg(eye = (5.0, 0.0, 1.5), lookat = (0.0, 0.0, 0.0))
 
 @configclass
 class GraspEnvPlayCfg(GraspEnvCfg):

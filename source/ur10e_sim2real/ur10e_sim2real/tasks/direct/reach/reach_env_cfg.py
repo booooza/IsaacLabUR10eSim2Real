@@ -44,7 +44,7 @@ class ReachEnvCfg(DirectRLEnvCfg):
             -1, -1, -1, -1, # 4 ee orientation quat
             -1300, -1300, -1300, # 3 target position xyz
             -1, -1, -1, -1, # 4 target orientation quat
-            -np.pi*2, -np.pi*2, -np.pi*2, -np.pi*2, -np.pi*2, -np.pi*2 # 6 previous actions
+            -2.0944, -2.0944, -3.14159, -3.14159, -3.14159, -3.14159 # 6 previous actions
         ]),
         high=np.array([
             6.28319, 6.28319, 6.28319, 6.28319, 6.28319, 6.28319, # 6 joint positions
@@ -53,7 +53,7 @@ class ReachEnvCfg(DirectRLEnvCfg):
             1, 1, 1, 1, # 4 ee orientation quat
             1300, 1300, 1300, # 3 target position xyz
             1, 1, 1, 1, # 4 target orientation quat
-            np.pi*2, np.pi*2, np.pi*2, np.pi*2, np.pi*2, np.pi*2 # 6 previous actions
+            2.0944, 2.0944, 3.14159, 3.14159, 3.14159, 3.14159 # 6 previous actions
         ]), 
         shape=(32,), dtype=np.float64
     )
@@ -84,7 +84,7 @@ class ReachEnvCfg(DirectRLEnvCfg):
     reach_rot_threshold = 0.1 # 5.73 deg
     reach_pos_w = 1.0
     reach_rot_w = 1.0
-    reach_success_w = 10.0
+    reach_success_w = 100.0
     success_bonus_stable_steps = 5 # 5*(1/125) = (~40 ms)
 
     # reward weights
@@ -98,6 +98,8 @@ class ReachEnvCfg(DirectRLEnvCfg):
     joint_vel_limit_w = -1.0
     min_link_distance_w = -1.0
     success_bonus_w = 10.0
+
+    randomize_joints = True
 
     # target 
     target_cfg = VisualizationMarkersCfg(
