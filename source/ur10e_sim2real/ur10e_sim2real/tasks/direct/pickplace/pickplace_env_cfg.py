@@ -28,41 +28,37 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 @configclass
 class PickPlaceEnvCfg(GraspEnvCfg):
     decimation = 1
-
+    seed = None
     # - spaces definition
     action_space = gym.spaces.Box(
-        low=np.array([-2.0944, -2.0944, -3.14159, -3.14159, -3.14159, -3.14159, -1]), 
-        high=np.array([2.0944, 2.0944, 3.14159, 3.14159, 3.14159, 3.14159, 1]), 
-        shape=(7,), dtype=np.float64
+        low=np.array([-2.0944, -2.0944, -3.14159, -3.14159, -3.14159, -3.14159]), 
+        high=np.array([2.0944, 2.0944, 3.14159, 3.14159, 3.14159, 3.14159]), 
+        shape=(6,), dtype=np.float64
     )
     observation_space = gym.spaces.Box(
         low=np.array([
             -6.28319, -6.28319, -6.28319, -6.28319, -6.28319, -6.28319, # 6 joint positions
-            -2.0944, -2.0944, -3.14159, -3.14159, -3.14159, -3.14159, # 6 joint velocities
+            -2.0944, -2.0944, -3.14159, -3.14159, -3.14159, -3.14159,    # 6 joint velocities
             -1.3, -1.3, -1.3, # 3 ee position xyz
             -1, -1, -1, -1, # 4 ee orientation quat
             -1.3, -1.3, -1.3, # 3 object position xyz
             -1, -1, -1, -1, # 4 object orientation quat
             -1.3, -1.3, -1.3, # 3 target position xyz
             -1, -1, -1, -1, # 4 target orientation quat
-            -1, # 1 gripper position (-1 fully closed)
-            -1, # 1 target width gripper max width normalized
-            -2.0944, -2.0944, -3.14159, -3.14159, -3.14159, -3.14159, -1 # 7 previous actions
+            -2.0944, -2.0944, -3.14159, -3.14159, -3.14159, -3.14159 # 6 previous actions
         ]),
         high=np.array([
             6.28319, 6.28319, 6.28319, 6.28319, 6.28319, 6.28319, # 6 joint positions
-            2.0944, 2.0944, 3.14159, 3.14159, 3.14159, 3.14159, # 6 joint velocities
+            2.0944, 2.0944, 3.14159, 3.14159, 3.14159, 3.14159,    # 6 joint velocities
             1.3, 1.3, 1.3, # 3 ee position xyz
             1, 1, 1, 1, # 4 ee orientation quat
             1.3, 1.3, 1.3, # 3 object position xyz
             1, 1, 1, 1, # 4 object orientation quat
             1.3, 1.3, 1.3, # 3 target position xyz
             1, 1, 1, 1, # 4 target orientation quat
-            1, # 1 gripper positions (+1 fully open)
-            1, # 1 target width gripper max width normalized
-            2.0944, 2.0944, 3.14159, 3.14159, 3.14159, 3.14159, 1 # 7 previous actions
+            2.0944, 2.0944, 3.14159, 3.14159, 3.14159, 3.14159 # 6 previous actions
         ]), 
-        shape=(42,), dtype=np.float64
+        shape=(39,), dtype=np.float64
     )
     state_space = 0
     # simulation
@@ -91,15 +87,15 @@ class PickPlaceEnvCfg(GraspEnvCfg):
     min_link_distance_w = 1.0
 
     # thresholds
-    reach_pos_threshold = 0.015 # 1.5 cm
-    reach_rot_threshold = 0.1 # 5.73 deg
+    reach_pos_threshold = 0.02 # 2 cm
+    reach_rot_threshold = 0.2 # 11 deg
     grasp_force_threshold = 10.0 # 10 nm
     grasp_width_threshold = 0.005 # 5 mm
     minimal_lift_height = 0.04 # 4 cm
-    transport_pos_threshold = 0.05 # 5 cm
-    transport_rot_threshold = 0.2 # 11.4592 deg
-    place_pos_threshold = 0.02 # 2 cm
-    place_rot_threshold = 0.1 
+    place_pos_threshold = 0.05 # 5 cm
+    transport_pos_threshold = 0.07 # 7 cm
+    place_rot_threshold = 0.1  # 5.73 deg
+    max_transport_dist = 0.65
 
     # std
     distance_ee_obj_tanh_std = 0.1 # 90% reward at 1 cm, non-zero from 0.5m

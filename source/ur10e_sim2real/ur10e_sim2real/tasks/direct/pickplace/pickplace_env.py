@@ -16,7 +16,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 import isaaclab.utils.math as math_utils
-from isaaclab.utils.math import quat_error_magnitude
+from isaaclab.utils.math import quat_error_magnitude, quat_mul, quat_inv
 from isaaclab.markers.config import FRAME_MARKER_CFG, VisualizationMarkersCfg
 from isaaclab.markers import SPHERE_MARKER_CFG, VisualizationMarkers
 from isaaclab.sensors import FrameTransformerCfg
@@ -65,16 +65,17 @@ class PickPlaceEnv(GraspEnv):
         self.table_height = 0.015  # From init state
         self.max_lift_height = 0.10 # 10cm above table
         self.pre_grasp_offset_z = 0.05  # 5cm above object
-        self.curriculum_update_interval = 750 # every 1 full episodes
+        self.curriculum_update_interval = 350 # every half episodes
 
         # initialize goal marker
         self.goal_markers = VisualizationMarkers(self.cfg.target_cfg)
 
         # initialize target position w.r.t. robot base
-        self.target_pos_low  = torch.tensor([0.40, -0.25, 0.20], device=self.device)
-        self.target_pos_high = torch.tensor([0.70,  0.25, 0.50], device=self.device)
-        self.target_pos = torch.tensor([[0.55, 0.0, 0.25]], device=self.device).repeat(self.num_envs, 1)
-        self.target_quat = torch.tensor([[0.0, -0.70710678, 0.70710678, 0.0]], device=self.device).repeat(self.num_envs, 1)
+        self.target_pos_low  = torch.tensor([0.50,  0.15, 0.015], device=self.device)
+        self.target_pos_high = torch.tensor([0.70,  0.35, 0.015], device=self.device)
+        # # Front-right of robot (60cm in front of robot base)
+        self.target_pos = torch.tensor([[0.60, 0.25, 0.015]], device=self.device).repeat(self.num_envs, 1)
+        self.target_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device).repeat(self.num_envs, 1)  # Identity quat (Z up)
         self.target_pos_w = torch.zeros((self.num_envs, 3), device=self.device)
         self.target_quat_w = torch.zeros((self.num_envs, 4), device=self.device)
         self.target_quat_w[:, 0] = 1.0 
@@ -92,38 +93,47 @@ class PickPlaceEnv(GraspEnv):
             torch.zeros_like(obj_yaw), # Pitch = 0
             obj_yaw, # Match object yaw
         )
+        # Initialize success tracking tensors
+        self.reached_object = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.grasped_object = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.transported_object = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.placed_object = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+
 
         # Initialize dynamic curriculum
         # Stage Tracking (per env)
         self.current_stage = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self.furthest_stage_reached = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        self.reach_success_rate = 0.0
+        self.best_reach_rate = 0.0
 
         # Weight adaptation hyperparams (global)
         self.K = 1.0 # Multiplier
         self.mu_min = 0.1
-        self.mu_max = 1.0
+        self.mu_max = 100.0
 
         self.stages = {
-            0: "Reaching",
-            1: "Grasping",
-            2: "Transporting",
-            3: "Placing"
+            0: "Picking",
+            1: "Lifting",
+            2: "Placing",
+            3: "Done",
         }
         self.stage_rewards = {
-            0: ['distance_ee_pregrasp_l2', 'rot_error_ee_obj_rad'],
-            1: ['distance_ee_obj_l2', 'grip_error', 'lift_error'],
-            2: ['distance_obj_target_l2', 'rot_error_obj_target_rad'],
-            3: ['success_bonus'],
+            0: ['distance_ee_obj_l2', 'rot_error_ee_obj_rad', 'reach_reward', 'reach_bonus'],
+            1: ['lift_reward', 'lift_bonus'],
+            2: ['distance_obj_target_l2', 'rot_error_obj_target_rad', 'place_bonus'],
+            3: [],
         }
         self.reward_weights = {
-            'distance_ee_pregrasp_l2': 0.1, # Stage 0
+            'distance_ee_obj_l2': 0.2,  # Stage 0
             'rot_error_ee_obj_rad': 0.1, # Stage 0
-            'distance_ee_obj_l2': 0.1,  # Stage 1
-            'grip_error': 0.2, # Stage 1
-            'lift_error': 2.5, # Stage 1
+            'reach_reward': 1.0,          # Stage 0
+            'reach_bonus': 10.0,          # Stage 0
+            'lift_reward': 1.0,        # Stage 1
+            'lift_bonus': 10.0,        # Stage 1
             'distance_obj_target_l2': 0.2,  # Stage 2
             'rot_error_obj_target_rad': 0.1, # Stage 2
-            'success_bonus': 1.0,  # Stage 3
+            'place_bonus': 100.0,         # Stage 2
         }
 
         # add handle for debug visualization (this is set to a valid handle inside set_debug_vis)
@@ -150,9 +160,11 @@ class PickPlaceEnv(GraspEnv):
         ee_quat = ee_frame.data.target_quat_w[..., 0, :]
         object_frame = self.scene['object_frame']
         object_pos = object_frame.data.target_pos_w[..., 0, :]
-        obj_quat = self.scene['object_frame'].data.target_quat_source[..., 0, :]  # (num_envs, 4)
-        target_pos = self.scene['target_frame'].data.target_pos_source[..., 0, :]  # (num_envs, 3)
-        target_quat = self.scene['target_frame'].data.target_quat_source[..., 0, :]  # (num_envs, 4)
+        obj_quat = self.scene['object_frame'].data.target_quat_w[..., 0, :]  # (num_envs, 4)
+        # target_pos = self.scene['target_frame'].data.target_pos_source[..., 0, :]  # (num_envs, 3)
+        # target_quat = self.scene['target_frame'].data.target_quat_source[..., 0, :]  # (num_envs, 4)
+        target_pos = self.target_pos_w  # (num_envs, 3)
+        target_quat = self.target_quat_w  # (num_envs, 4)
         
         distance_ee_obj_l2 = torch.norm(object_pos - ee_pos, p=2, dim=-1)
         rot_error_ee_obj_rad = quat_error_magnitude(self.grasp_quat_w, ee_quat)
@@ -160,8 +172,6 @@ class PickPlaceEnv(GraspEnv):
                   (rot_error_ee_obj_rad < self.cfg.reach_rot_threshold)
         distance_obj_target_l2 = torch.norm(target_pos - object_pos, dim=1)
         rot_error_obj_target_rad = quat_error_magnitude(target_quat, obj_quat)
-        transported = (distance_obj_target_l2 < self.cfg.transport_pos_threshold) & \
-                  (rot_error_obj_target_rad < self.cfg.transport_rot_threshold)
 
         # Check if object is grasped
         gripper_positions = self.robot.data.joint_pos[:, self.gripper_joint_ids]
@@ -177,7 +187,7 @@ class PickPlaceEnv(GraspEnv):
         
         # Split actions into arm (6) and gripper (1)
         arm_actions = self.actions[:, :6]  # (num_envs, 6)
-        gripper_action = self.actions[:, 6:7]  # (num_envs, 1)
+        # gripper_action = self.actions[:, 6:7]  # (num_envs, 1)
 
         processed_arm_actions = torch.clamp(
             arm_actions,
@@ -188,20 +198,33 @@ class PickPlaceEnv(GraspEnv):
         # If close to object but not yet grasped: freeze arm
         attempting_grasp = reached & ~object_grasped
 
-        # processed_arm_actions[attempting_grasp] = 0.0
 
         # Gripper control (scripted)
         gripper_open_pos = self.gripper_max_width / 2  # Each finger at max
         gripper_closed_pos = self.obj_width / 2  # Each finger at object width/2
 
+        # If the object is close to the target: open gripper
+        should_open_gripper = (
+            (distance_obj_target_l2 < self.cfg.place_pos_threshold) &
+            (self.grasped_object)
+        )
+
         # If grasped OR attempting grasp: close gripper
         # Otherwise: open gripper
-        should_close_gripper = (object_grasped | attempting_grasp) & ~transported
+        should_close_gripper = (object_grasped | attempting_grasp) & ~should_open_gripper
         finger_position = torch.where(
             should_close_gripper.unsqueeze(-1),
             torch.full((self.num_envs, 1), 0.0, device=self.device),
             torch.full((self.num_envs, 1), gripper_open_pos, device=self.device)
         )
+
+        # Binary control
+        # should_close_gripper = gripper_action > 0 # (num_envs, 1)
+        # finger_position = torch.where(
+        #     should_close_gripper,
+        #     torch.full((self.num_envs, 1), 0.0, device=self.device),
+        #     torch.full((self.num_envs, 1), gripper_open_pos, device=self.device)
+        # )
 
         # # Clamp gripper action to [-1, 1]
         # gripper_action = torch.clamp(gripper_action, min=-1.0, max=1.0)
@@ -250,8 +273,10 @@ class PickPlaceEnv(GraspEnv):
         obj_quat = self.scene['object_frame'].data.target_quat_source[..., 0, :]  # (num_envs, 4)
         
         # Target pose
-        target_pos = self.scene['target_frame'].data.target_pos_source[..., 0, :]  # (num_envs, 3)
-        target_quat = self.scene['target_frame'].data.target_quat_source[..., 0, :]  # (num_envs, 4)
+        # target_pos = self.scene['target_frame'].data.target_pos_source[..., 0, :]  # (num_envs, 3)
+        # target_quat = self.scene['target_frame'].data.target_quat_source[..., 0, :]  # (num_envs, 4)
+        target_pos = self.target_pos  # (num_envs, 3)
+        target_quat = self.target_quat  # (num_envs, 4)
         
         # Normalize target width to [-1, 1]
         target_width_normalized = 2.0 * (self.obj_width / self.gripper_max_width) - 1.0
@@ -263,271 +288,116 @@ class PickPlaceEnv(GraspEnv):
         current_width_normalized = 2.0 * (current_gripper_width / self.gripper_max_width) - 1.0
         gripper_width = current_width_normalized.unsqueeze(-1)  # (num_envs, 1)
         
+        obj_pos_rel = obj_pos - ee_pos
+        obj_quat_rel = quat_mul(quat_inv(ee_quat), obj_quat)
+        target_pos_rel = target_pos - obj_pos
+        target_quat_rel = quat_mul(quat_inv(obj_quat), target_quat)
+
         obs = torch.cat(
             (
                 joint_positions,          # (num_envs, 6) [-1, 1]
-                joint_velocities,         # (num_envs, 6) [-1, 1]
+                joint_velocities,           # (num_envs, 6) 
                 ee_pos,                   # (num_envs, 3)
                 ee_quat,                  # (num_envs, 4)
-                obj_pos,                   # (num_envs, 3)
-                obj_quat,                  # (num_envs, 4)
-                target_pos,               # (num_envs, 3)
-                target_quat,              # (num_envs, 4)
-                gripper_width,              # (num_envs, 1) [-1, 1]
-                target_width,      # (num_envs, 1) [-1, 1]
+                obj_pos_rel,          # (num_envs, 3)
+                obj_quat_rel,                  # (num_envs, 4)
+                target_pos_rel,      # (num_envs, 3)
+                target_quat_rel,              # (num_envs, 4)
                 self.previous_actions,    # (num_envs, 7)
             ),
             dim=-1,
         )
         
         return {"policy": obs}
-            
+
     def _get_rewards(self) -> torch.Tensor:
-        # get scene entities
         ee_frame = self.scene['ee_frame']
         ee_pos = ee_frame.data.target_pos_w[..., 0, :3]
         ee_quat = ee_frame.data.target_quat_w[..., 0, :]
-        target_frame = self.scene['target_frame']
-        target_pos = target_frame.data.target_pos_w[..., 0, :]
-        target_quat = target_frame.data.target_quat_w[..., 0, :]
         object_frame = self.scene['object_frame']
         object_pos = object_frame.data.target_pos_w[..., 0, :]
-        object_quat = object_frame.data.target_quat_w[..., 0, :]
-        # Pre-grasp position (hover above object)
-        self.grasp_pos_w = object_pos + self.grasp_offset
-        _, _, obj_yaw = math_utils.euler_xyz_from_quat(object_quat)
-        self.grasp_quat_w = torch_utils.quat_from_euler_xyz(
-            torch.ones_like(obj_yaw) * torch.pi,  # Roll = π (Z down)
-            torch.zeros_like(obj_yaw),             # Pitch = 0
-            obj_yaw                                # Yaw = match current object
-        )
-        gripper_positions = self.robot.data.joint_pos[:, self.gripper_joint_ids]
-        current_gripper_width = gripper_positions.sum(dim=-1)
-        object_height = object_pos[:, 2]
 
-        # compute rewards terms
-        distance_ee_pregrasp_l2 = torch.norm(self.grasp_pos_w - ee_pos, p=2, dim=-1)
-        distance_ee_obj_l2 = torch.norm(object_pos - ee_pos, p=2, dim=-1)
-        distance_ee_obj_tanh = 1.0 - torch.tanh(torch.norm(object_pos - ee_pos, p=2, dim=-1) / self.cfg.distance_ee_obj_tanh_std)
-        distance_ee_obj_tanh_fine = 1.0 - torch.tanh(distance_ee_obj_l2 / self.cfg.distance_ee_obj_tanh_fine_std)
-        rot_error_ee_obj_rad = quat_error_magnitude(self.grasp_quat_w, ee_quat)
-        rot_error_ee_obj_tanh = 1.0 - torch.tanh(rot_error_ee_obj_rad / self.cfg.rot_error_ee_obj_tanh_std)
-        grip_width_l2 = torch.abs(current_gripper_width - self.obj_width)
-        grip_width_tanh = 1.0 - torch.tanh(grip_width_l2 / self.cfg.grip_width_tanh_std)
-        # 0 if error is 0, 1 if error is maximal
-        grip_error = torch.clamp(grip_width_l2 / self.gripper_max_width, min=0.0, max=1.0)
-        # Only reward gripper closing when close to object
-        close_to_object = distance_ee_obj_l2 < (self.obj_width / 2)  # (assuming cube)
-        grip_error_conditional = torch.where(
-            close_to_object,
-            grip_width_tanh,
-            torch.zeros_like(grip_width_tanh)
-        )
-        # 0 if not lifted, 1 if lifted to target
-        lift_height = object_height - self.table_height
-        lift_error_l2 = self.max_lift_height - lift_height
-        lift_error = torch.clamp(lift_error_l2 / self.max_lift_height, min=0.0, max=1.0)
-        distance_obj_target_l2 = torch.norm(target_pos - object_pos, dim=1)
-        distance_obj_target_tanh = 1 - torch.tanh(distance_obj_target_l2 / self.cfg.distance_obj_target_tanh_std)
-        distance_obj_target_tanh_fine = 1 - torch.tanh(distance_obj_target_l2 / self.cfg.distance_obj_target_tanh_fine_std)
-        rot_error_obj_target_rad = quat_error_magnitude(target_quat, object_quat)
-        obj_lin_vel = torch.norm(self.scene.rigid_objects['object'].data.root_com_lin_vel_w , dim=1)
-        obj_ang_vel = torch.norm(self.scene.rigid_objects['object'].data.root_com_ang_vel_w , dim=1)
+        # Calculations
+        reach_dist = torch.norm(ee_pos - object_pos, dim=-1)
+        reach_rot_error = quat_error_magnitude(self.grasp_quat_w, ee_quat)
 
-        # compute penalty terms
-        action_l2 = torch.sum(torch.square(self.actions), dim=1)
-        action_rate_l2 = torch.sum(torch.square(self.actions - self.previous_actions), dim=1)
-        joint_pos_limit = self._joint_pos_limits(self.joint_ids)
-        joint_vel_limit = self._joint_vel_limits(self.joint_ids, soft_ratio=1.0)
-        min_link_distance = self._minimum_link_distance(min_dist=0.1)
-
-        # Stage Transitions
-        # S0 -> S1: Reached object within threshold
-        reached: torch.Tensor = (distance_ee_obj_l2 < self.cfg.reach_pos_threshold) & \
-                  (rot_error_ee_obj_rad < self.cfg.reach_rot_threshold)
-        if reached.any():
-            print(f"Reached for {reached.sum().item()} envs.")
-
-        # S1 → S2: Grasped object and lifted to minimal height
-        gripper_closed_correctly = grip_width_l2 < self.cfg.grasp_width_threshold
         contact_forces = self.scene._sensors['contact_sensor']._data.net_forces_w # (num_envs, 2, 3)
         normal_forces = contact_forces[:, :, 1].abs()
         min_normal_force = torch.min(normal_forces, dim=-1).values # both fingers need y-forces
-        gripper_contact_detected = min_normal_force > self.cfg.grasp_force_threshold # Force threshold (nm)
-        lifted = lift_height > self.cfg.minimal_lift_height 
-        if lifted.any():
-            print(f"Lifted for {lifted.sum().item()} envs.")
+        gripper_contact_detected = min_normal_force > self.cfg.grasp_force_threshold
 
-        grasped = gripper_contact_detected # & gripper_closed_correctly
-        if grasped.any():
-            print(f"Grasped for {grasped.sum().item()} envs.")
+        transport_dist = torch.norm(object_pos - self.target_pos_w, dim=-1)
+        transport_dist_clamped = torch.clamp(transport_dist, 0.0, self.cfg.max_transport_dist)
 
-        # S2 → S3: Transported object
-        transported = (distance_obj_target_l2 < self.cfg.transport_pos_threshold) & \
-                  (rot_error_obj_target_rad < self.cfg.transport_rot_threshold)
-        
-        if transported.any():
-            print(f"Transported for {transported.sum().item()} envs.")
+        # Phase success / bonus
+        reached = (reach_dist < self.cfg.reach_pos_threshold) & (reach_rot_error < self.cfg.reach_rot_threshold)
+        grasped = gripper_contact_detected
+        transported = (transport_dist < self.cfg.transport_pos_threshold)
+        placed = (transport_dist < self.cfg.place_pos_threshold) & ~self.grasped_object
 
-        # S4 → Success: Placed object (released + stable + at goal)
-        placed = (distance_obj_target_l2 < self.cfg.place_pos_threshold) & \
-                  (rot_error_obj_target_rad < self.cfg.place_rot_threshold) & \
-                 (grip_width_l2 > self.obj_width) & \
-                 ~gripper_contact_detected & \
-                 (obj_lin_vel < 0.1) & (obj_ang_vel < 0.1)
+        # Compute bonuses before updating success flags
+        reach_bonus = torch.where(reached & ~self.reached_object, 100.0, 0.0)
+        grasp_bonus = torch.where(grasped, 50.0, 0.0)
+        transport_bonus = torch.where(transported, 100.0, 0.0)
+        place_bonus = torch.where(placed & ~self.transported_object, 1000.0, 0.0)
 
-        # Update stages
-        self._progress_stages_vectorized(reached, grasped, transported, placed)
+        # Update flags
+        self.reached_object |= reached
+        self.grasped_object |= grasped
+        self.transported_object |= transported
+        self.placed_object |= placed
 
-        reach_bonus = torch.where(
-            reached & (~self.reach_success),
-            torch.ones_like(grasped, dtype=torch.float),
-            torch.zeros_like(grasped, dtype=torch.float)
+        # Task rewards
+        reach_reward = -2.0 * reach_dist - 1.0 * reach_rot_error
+        transport_reward = torch.where(
+            grasped,
+            150.0 * (self.cfg.max_transport_dist - transport_dist_clamped) / self.cfg.max_transport_dist,
+            0.0
         )
 
-        grasp_bonus = torch.where(
-            grasped & (~self.grasp_success),
-            torch.ones_like(grasped, dtype=torch.float),
-            torch.zeros_like(grasped, dtype=torch.float)
-        )
+        # Total reward
+        reward = reach_reward + reach_bonus + grasp_bonus + transport_reward + transport_bonus + place_bonus
 
-        lift_bonus = torch.where(
-            lifted & (~self.lift_success),
-            torch.ones_like(lifted, dtype=torch.float),
-            torch.zeros_like(lifted, dtype=torch.float)
-        )
-
-        transport_bonus = torch.where(
-            transported & (~self.transport_success),
-            torch.ones_like(transported, dtype=torch.float),
-            torch.zeros_like(transported, dtype=torch.float)
-        )
-
-        # Compute success bonus (only once per episode)
-        success_bonus = torch.where(
-            placed & (~self.place_success),
-            torch.ones_like(placed, dtype=torch.float),
-            torch.zeros_like(placed, dtype=torch.float)
-        )
-        self.place_success = self.place_success | placed
-        
-        # Task Reward with dynamic weights
-        # task_reward = (
-        #     - self.reward_weights['distance_ee_pregrasp_l2'] * distance_ee_obj_l2 + 
-        #     - self.reward_weights['rot_error_ee_obj_rad'] * rot_error_ee_obj_rad +
-        #     - self.reward_weights['distance_ee_obj_l2'] * distance_ee_obj_l2 +  
-        #     - self.reward_weights['grip_error'] * grip_error_conditional +
-        #     - self.reward_weights['lift_error'] * lift_error +
-        #     - self.reward_weights['distance_obj_target_l2'] * distance_obj_target_l2 +
-        #     # - self.reward_weights['rot_error_obj_target_rad'] * rot_error_obj_target_rad +
-        #     # 10.0 * reach_bonus +
-        #     # 20.0 * grasp_bonus +
-        #     # 30.0 * lift_bonus +
-        #     # 40.0 * transport_bonus +
-        #     1000.0 * success_bonus
-        # )
-        # Only reward gripper closing when close to object
-        grip_width_reward = torch.where(
-            reached,
-            grip_width_tanh,
-            torch.zeros_like(grip_width_tanh)
-        )
-        lift_reward = torch.clamp(lift_height / self.max_lift_height, min=0.0, max=1.0)
-        task_reward = (
-            -2.0 * distance_ee_obj_l2 +
-            -1.0 * rot_error_ee_obj_rad +
-            # -2.0 * distance_obj_target_l2 +
-            # -1.0 * rot_error_obj_target_rad +
-            2.0 * grip_width_reward + 
-            5.0 * lift_reward +
-            100.0 * reach_bonus
-            # 200.0 * grasp_bonus +
-            # 300.0 * lift_bonus + 
-            # 400.0 * transport_bonus
-        )
-        
-        # Penalties
-        penalty = (
-            # Regularization penalties
-            - self.cfg.action_l2_w * action_l2 +
-            - self.cfg.action_rate_l2_w * action_rate_l2 +
-            # Safety limits
-            - self.cfg.joint_pos_limit_w * joint_pos_limit +
-            - self.cfg.joint_vel_limit_w * joint_vel_limit +
-            - self.cfg.min_link_distance_w * min_link_distance
-        )
-        
-        reward = task_reward + penalty
-
-        if self.common_step_counter % self.curriculum_update_interval == 0 and self.common_step_counter > 0:
-            self._adapt_weights(self.robot._ALL_INDICES)
-            self._print_stage_summary(self.robot._ALL_INDICES)
-
-        # Log stage distribution
-        for stage_id, stage_name in self.stages.items():
-            count = (self.current_stage == stage_id).sum().item()
-            self.extras[f"Stage/current_{stage_name}"] = count
-            
-        for stage_id, stage_name in self.stages.items():
-            count = (self.furthest_stage_reached == stage_id).sum().item()
-            self.extras[f"Stage/furthest_{stage_name}"] = count
-        
-        # Log current weights
-        for key, weight in self.reward_weights.items():
-            self.extras[f"Weights/{key}"] = weight
-
-        # Log Rewards
-        self.extras["Rewards/task"] = task_reward.mean().item()
-        self.extras["Rewards/penalty"] = penalty.mean().item()
-        self.extras["Rewards/total"] = reward.mean().item()
-
-        # Debug logs
-        self.extras["Debug/distance_ee_pregrasp_l2"] = distance_ee_pregrasp_l2.mean().item()
-        self.extras["Debug/distance_ee_obj_l2"] = distance_ee_obj_l2.mean().item()
-        self.extras["Debug/rot_error_ee_obj_rad"] = rot_error_ee_obj_rad.mean().item()
-        self.extras["Debug/distance_obj_target_l2"] = distance_obj_target_l2.mean().item()
-        self.extras["Debug/grip_width_l2"] = grip_width_l2.mean().item()
-        self.extras["Debug/lift_error_l2"] = lift_error_l2.mean().item()
-        self.extras["Debug/action_magnitude"] = self.actions.abs().mean().item()
-        self.extras["Debug/max_joint_velocity"] = self.robot.data.joint_vel[:, self.joint_ids].abs().max().item()
-
-        # --- Logging ---
-        self.episode_reward += reward
-        self.distance_l2 = distance_ee_obj_l2
-        self.target_l2 = distance_obj_target_l2
-        self.grip_width_l2 = grip_width_l2
-        self.lift_height = lift_height
+        print("--- Reward Debug ---")
+        print(f"Reach reward: mean={reach_reward.mean().item():.2f}, min={reach_reward.min().item():.2f}, max={reach_reward.max().item():.2f}")
+        print(f"Reach bonus: mean={reach_bonus.mean().item():.2f}, min={reach_bonus.min().item():.2f}, max={reach_bonus.max().item():.2f}")
+        print(f"Grasp bonus: mean={grasp_bonus.mean().item():.2f}, min={grasp_bonus.min().item():.2f}, max={grasp_bonus.max().item():.2f}")
+        print(f"Transport reward: mean={transport_reward.mean().item():.2f}, min={transport_reward.min().item():.2f}, max={transport_reward.max().item():.2f}")
+        print(f"Transport bonus: mean={transport_bonus.mean().item():.2f}, min={transport_bonus.min().item():.2f}, max={transport_bonus.max().item():.2f}")
+        print(f"Place bonus: mean={place_bonus.mean().item():.2f}, min={place_bonus.min().item():.2f}, max={place_bonus.max().item():.2f}")
+        print(f"Total reward: mean={reward.mean().item():.2f}, min={reward.min().item():.2f}, max={reward.max().item():.2f}")
+        print(f"Reach distance: mean={reach_dist.mean().item():.2f}, min={reach_dist.min().item():.2f}, max={reach_dist.max().item():.2f}")
+        print(f"Transport distance: mean={transport_dist.mean().item():.2f}, min={transport_dist.min().item():.2f}, max={transport_dist.max().item():.2f}")
+        print(f"Reached object? {self.reached_object.float().mean().item():.2f}")
+        print(f"Grasped object? {self.grasped_object.float().mean().item():.2f}")
+        print(f"Transported object? {self.transported_object.float().mean().item():.2f}")
+        print(f"Placed object? {self.placed_object.float().mean().item():.2f}")
+        print("-------------------")
 
         return reward
 
-    def _progress_stages_vectorized(self, reached, grasped, transported, placed):
+    def _progress_stages_vectorized(self, grasped, lifted, placed):
         """
         Vectorized stage progression for multiple environments.
         Inputs are tensors of shape [num_envs] with boolean values.
         """
         current = self.current_stage  # shape: [num_envs]
 
-        # Stage 0 → 1 (Reach → Grasp)
-        mask0 = (current == 0) & reached
+        # Stage 0 → 1: Grasped
+        mask0 = (current == 0) & grasped
         self.current_stage[mask0] = 1
 
-        # Stage 1 → 2 (Grasp → Transport) or back to 1 if dropped
-        mask1_up = (current == 1) & grasped
+        # Stage 1 → 2: Lifted
+        mask1_up = (current == 1) & lifted
         mask1_down = (current == 1) & (~grasped)
         self.current_stage[mask1_up] = 2
-        self.current_stage[mask1_down] = 1
+        self.current_stage[mask1_down] = 0
 
-        # Stage 2 → 3 (Transport → Place) or back to 1 if dropped
-        mask2_up = (current == 2) & transported
-        mask2_down = (current == 2) & (~grasped)
+        # Stage 2 → 3: Placed
+        mask2_up = (current == 2) & placed
+        mask2_down = (current == 2) & (~placed) & (~grasped | ~lifted)
         self.current_stage[mask2_up] = 3
-        self.current_stage[mask2_down] = 1
-
-        # Stage 3 → check placed, or back to 1 if dropped
-        mask3_done = (current == 3) & placed
-        mask3_down = (current == 3) & (~grasped)
-        # self.current_stage[mask3_done] stays at 3 (success!)
-        self.current_stage[mask3_down] = 1
+        self.current_stage[mask2_down] = 0
 
         # Track furthest stage reached (never goes backward)
         self.furthest_stage_reached = torch.maximum(
@@ -579,7 +449,12 @@ class PickPlaceEnv(GraspEnv):
         DirectRLEnv._reset_idx(self, env_ids)
         # Reset parent (robot, articulation, stats, etc.)
         self._reset_episode_stats()
-
+        # Reset success flags for the reset environments
+        self.reached_object[env_ids] = False
+        self.grasped_object[env_ids] = False
+        self.transported_object[env_ids] = False
+        self.placed_object[env_ids] = False
+        
         if self.cfg.randomize_joints:
             self.__reset_joints_by_offset(env_ids, position_range=(-1.0, 1.0))
         else:
@@ -588,7 +463,9 @@ class PickPlaceEnv(GraspEnv):
         # Reset the object
         self._reset_object_uniform(env_ids, self.scene.rigid_objects['object'], pose_range=self.cfg.object_pose_range, velocity_range={})
         # Reset the target
-        self._reset_object_uniform(env_ids, self.scene.rigid_objects['target'], pose_range=self.cfg.target_pose_range, velocity_range={})
+        # self._reset_object_uniform(env_ids, self.scene.rigid_objects['target'], pose_range=self.cfg.target_pose_range, velocity_range={})
+        # self._reset_target_pose(env_ids)
+        self._reset_target_uniform(env_ids, self.cfg.target_pose_range)
 
         # Reset grasp pos/quat
         object_frame = self.scene['object_frame']
@@ -601,7 +478,6 @@ class PickPlaceEnv(GraspEnv):
             torch.zeros_like(obj_yaw), # Pitch = 0
             obj_yaw, # Match object yaw
         )
-
 
         # --- Stage summary print ---
 
@@ -734,7 +610,6 @@ class PickPlaceEnv(GraspEnv):
         self.reach_success = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.grasp_success = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.lift_success = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-        self.transport_success = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.place_success = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
     def _log_episode_stats(self, env_ids):
@@ -745,13 +620,64 @@ class PickPlaceEnv(GraspEnv):
         self.extras["Episode/reach_success"] = self.reach_success.float().mean().item()
         self.extras["Episode/grasp_success"] = self.grasp_success.float().mean().item()
         self.extras["Episode/lift_success"] = self.lift_success.float().mean().item()
-        self.extras["Episode/transport_success"] = self.transport_success.float().mean().item()
         self.extras["Episode/place_success"] = self.place_success.float().mean().item()
 
 
     def _debug_vis_callback(self, event):
         # update the markers
         self.goal_pos_visualizer.visualize(
-            translations=self.grasp_pos_w,
-            orientations=self.grasp_quat_w,
+            translations=self.target_pos_w,
+            orientations=self.target_quat_w,
         )
+
+    def _reset_target_pose(self, env_ids):
+        # update goal pose and markers within workspace bounds
+
+        # sample positions
+        rand_pos = torch.rand((len(env_ids), 3), device=self.device)
+        self.target_pos[env_ids] = rand_pos * (self.target_pos_high - self.target_pos_low) + self.target_pos_low
+
+        # sample orientations with random yaw around z
+        yaw = (torch.rand(len(env_ids), device=self.device) - 0.5) * 2 * torch.pi
+        roll = torch.zeros_like(yaw)
+        pitch = torch.zeros_like(yaw)
+
+        self.target_quat[env_ids] = torch_utils.quat_from_euler_xyz(roll, pitch, yaw)
+
+        # convert to world frame
+        base_pos_w = self.robot.data.root_pos_w[env_ids]
+        base_quat_w = self.robot.data.root_quat_w[env_ids]
+        self.target_pos_w[env_ids] = torch_utils.quat_apply(base_quat_w, self.target_pos[env_ids]) + base_pos_w
+        self.target_quat_w[env_ids] = torch_utils.quat_mul(base_quat_w, self.target_quat[env_ids])
+
+    def _reset_target_uniform(
+        self,
+        env_ids: torch.Tensor,
+        pose_range: dict[str, tuple[float, float]],
+    ):
+        # Sample base positions uniformly within low/high bounds
+        rand_pos = torch.rand((len(env_ids), 3), device=self.device)
+        base_pos = rand_pos * (self.target_pos_high - self.target_pos_low) + self.target_pos_low
+        
+        # Apply additional pose range offsets
+        range_list = [pose_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z", "roll", "pitch", "yaw"]]
+        ranges = torch.tensor(range_list, device=self.device)
+        rand_samples = math_utils.sample_uniform(
+            ranges[:, 0], ranges[:, 1], (len(env_ids), 6), device=self.device
+        )
+        
+        # Apply position offsets
+        self.target_pos[env_ids] = base_pos + rand_samples[:, 0:3]
+        
+        # Apply orientation (roll, pitch, yaw)
+        self.target_quat[env_ids] = math_utils.quat_from_euler_xyz(
+            rand_samples[:, 3],  # roll
+            rand_samples[:, 4],  # pitch
+            rand_samples[:, 5]   # yaw
+        )
+        
+        # Convert to world frame
+        base_pos_w = self.robot.data.root_pos_w[env_ids]
+        base_quat_w = self.robot.data.root_quat_w[env_ids]
+        self.target_pos_w[env_ids] = torch_utils.quat_apply(base_quat_w, self.target_pos[env_ids]) + base_pos_w
+        self.target_quat_w[env_ids] = torch_utils.quat_mul(base_quat_w, self.target_quat[env_ids])

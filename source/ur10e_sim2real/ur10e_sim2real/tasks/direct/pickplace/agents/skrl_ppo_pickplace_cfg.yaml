@@ -20,7 +20,7 @@ models:
     network:
       - name: net
         input: STATES
-        layers: [256, 128, 64]
+        layers: [256, 128, 64] # try: 512, 256, 128 or 256-256-128 
         activations: elu
     output: ACTIONS
   value:  # see deterministic_model parameters
@@ -29,7 +29,7 @@ models:
     network:
       - name: net
         input: STATES
-        layers: [256, 128, 64]
+        layers: [256, 128, 64] # try: 512, 256, 128 or 256-256-128 
         activations: elu
     output: ONE
 

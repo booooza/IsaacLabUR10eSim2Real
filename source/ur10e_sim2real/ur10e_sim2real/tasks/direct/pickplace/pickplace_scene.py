@@ -68,7 +68,6 @@ class PickPlaceSceneCfg(GraspSceneCfg):
                 "wrist_3_joint": 0.0,
                 "robotiq_hande_left_finger_joint": 0.025,
                 "robotiq_hande_right_finger_joint": 0.025,
-
             },
             pos=(0.0, 0.0, 0.0),
             rot=(1.0, 0.0, 0.0, 0.0),
@@ -180,31 +179,31 @@ class PickPlaceSceneCfg(GraspSceneCfg):
                 ),
             ),
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(0.74687, 0.17399, 0.015), # Center of the workspace (60cm in front of robot base)
+            pos=(0.60, -0.25, 0.015),  # Front-left of robot (60cm in front of robot base)
             rot=(1, 0, 0, 0)
         ),
     )
-    # Target to place the object - small bin
-    target = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Target",
-        spawn=UsdFileCfg(
-                usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/KLT_Bin/small_KLT.usd",
-                scale=(0.5, 0.5, 0.5),
-                rigid_props=RigidBodyPropertiesCfg( 
-                    solver_position_iteration_count=16,
-                    solver_velocity_iteration_count=1,
-                    max_angular_velocity=1000.0,
-                    max_linear_velocity=1000.0,
-                    max_depenetration_velocity=5.0,
-                    disable_gravity=False,
-                    kinematic_enabled=False,
-                ),
-            ),
-        init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(0.0, 0.75, 0.03766), # To the side of the robot
-            rot=(0.7071, 0, 0, 0.7071) # 90 deg around x
-        ),
-    )
+    # # Target to place the object - small bin
+    # target = RigidObjectCfg(
+    #     prim_path="{ENV_REGEX_NS}/Target",
+    #     spawn=UsdFileCfg(
+    #             usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/KLT_Bin/small_KLT.usd",
+    #             scale=(0.5, 0.5, 0.5),
+    #             rigid_props=RigidBodyPropertiesCfg( 
+    #                 solver_position_iteration_count=16,
+    #                 solver_velocity_iteration_count=1,
+    #                 max_angular_velocity=1000.0,
+    #                 max_linear_velocity=1000.0,
+    #                 max_depenetration_velocity=5.0,
+    #                 disable_gravity=False,
+    #                 kinematic_enabled=False,
+    #             ),
+    #         ),
+    #     init_state=RigidObjectCfg.InitialStateCfg(
+    #         pos=(0.55, 0.35, 0.04),  # Front-right of robot (50cm away from object)
+    #         rot=(0.7071, 0, 0, 0.7071) # 90 deg around x
+    #     ),
+    # )
     # End-effector frame tracker - tracking UR10e TCP 
     ee_frame = FrameTransformerCfg(
         prim_path="{ENV_REGEX_NS}/Robot/base_link",
@@ -245,26 +244,26 @@ class PickPlaceSceneCfg(GraspSceneCfg):
             }
         ),
     )
-    # Target frame tracker - tracking the target position wrt robot base
-    target_frame = FrameTransformerCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/base_link",
-        target_frames=[
-            FrameTransformerCfg.FrameCfg(
-                prim_path="{ENV_REGEX_NS}/Target",
-                name="target",
-            ),
-        ],
-        debug_vis=False,  # Set to True to visualize
-        visualizer_cfg=FRAME_MARKER_CFG.replace(
-            prim_path="/Visuals/FrameTransformer",
-            markers={
-                "frame": sim_utils.UsdFileCfg(
-                    usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/UIElements/frame_prim.usd",
-                    scale=(0.05, 0.05, 0.05),
-                ),
-            }
-        ),
-    )
+    # # Target frame tracker - tracking the target position wrt robot base
+    # target_frame = FrameTransformerCfg(
+    #     prim_path="{ENV_REGEX_NS}/Robot/base_link",
+    #     target_frames=[
+    #         FrameTransformerCfg.FrameCfg(
+    #             prim_path="{ENV_REGEX_NS}/Target",
+    #             name="target",
+    #         ),
+    #     ],
+    #     debug_vis=False,  # Set to True to visualize
+    #     visualizer_cfg=FRAME_MARKER_CFG.replace(
+    #         prim_path="/Visuals/FrameTransformer",
+    #         markers={
+    #             "frame": sim_utils.UsdFileCfg(
+    #                 usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/UIElements/frame_prim.usd",
+    #                 scale=(0.05, 0.05, 0.05),
+    #             ),
+    #         }
+    #     ),
+    # )
     light = AssetBaseCfg(
         prim_path="/World/light",
         spawn=sim_utils.DomeLightCfg(
