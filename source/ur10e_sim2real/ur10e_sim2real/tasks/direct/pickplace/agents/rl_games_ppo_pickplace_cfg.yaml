@@ -57,7 +57,7 @@ params:
     value_bootstrap: False
     num_actors: -1
     reward_shaper:
-      scale_value: 0.01
+      scale_value: 1.0
     normalize_advantage: True
     gamma: 0.99
     tau: 0.95

@@ -82,9 +82,10 @@ class PickPlaceEnvCfg(GraspEnvCfg):
     # linear penalties
     action_l2_w = 0.001
     action_rate_l2_w = 0.005
-    joint_pos_limit_w = 1.0
-    joint_vel_limit_w = 1.0
-    min_link_distance_w = 1.0
+    joint_pos_limit_w = 0.1
+    joint_vel_limit_w = 0.1
+    min_link_distance_w = 0.1
+    floor_collision_w = 0.2
 
     # thresholds
     reach_pos_threshold = 0.02 # 2 cm
@@ -92,6 +93,7 @@ class PickPlaceEnvCfg(GraspEnvCfg):
     grasp_force_threshold = 10.0 # 10 nm
     grasp_width_threshold = 0.005 # 5 mm
     minimal_lift_height = 0.04 # 4 cm
+    maximal_lift_height = 0.10 # 10cm above table
     place_pos_threshold = 0.05 # 5 cm
     transport_pos_threshold = 0.07 # 7 cm
     place_rot_threshold = 0.1  # 5.73 deg
@@ -114,3 +116,5 @@ class PickPlaceEnvPlayCfg(PickPlaceEnvCfg):
     """Configuration for grasp environment during play/testing."""
     episode_length_s = 3.0 # ~375 steps @ 125 Hz
     num_envs = 1
+    randomize_joints = False
+    viewer = ViewerCfg(eye = (12.0, 1.0, 1.5), lookat = (0.0, 0.0, 0.0))
