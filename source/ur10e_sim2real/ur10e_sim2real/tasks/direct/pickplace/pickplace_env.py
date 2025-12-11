@@ -347,6 +347,7 @@ class PickPlaceEnv(GraspEnv):
         lift_height = object_height - self.table_height
 
         transport_dist = torch.norm(object_pos - self.target_pos_w, dim=-1)
+        transport_dist_clamped = torch.clamp(transport_dist, 0.0, self.cfg.max_transport_dist)
         # Use XY distance only for transport
         transport_dist_xy = torch.norm(object_pos[:, :2] - self.target_pos_w[:, :2], dim=-1)
         transport_dist_xy_clamped = torch.clamp(transport_dist_xy, 0.0, self.cfg.max_transport_dist)
@@ -355,21 +356,25 @@ class PickPlaceEnv(GraspEnv):
         reached = (reach_dist < self.cfg.reach_pos_threshold) & (reach_rot_error < self.cfg.reach_rot_threshold)
         grasped = gripper_contact_detected
         lifted = lift_height > self.cfg.minimal_lift_height
-        transported = (transport_dist_xy < self.cfg.transport_pos_threshold)
-        placed = (transport_dist < self.cfg.place_pos_threshold) & ~grasped
+        # transported = (transport_dist_xy < self.cfg.transport_pos_threshold)
+        
+        # Object must be stable (low velocity)
+        object_vel = self.scene.rigid_objects['object'].data.root_lin_vel_w
+        is_stable = torch.norm(object_vel, dim=-1) < 0.05
+        placed = (transport_dist_xy < self.cfg.place_pos_threshold) & is_stable & ~grasped
 
         # Compute bonuses before updating success flags
         reach_bonus = torch.where(reached & ~self.reached_object, 1.0, 0.0)
         grasp_bonus = torch.where(grasped & ~self.grasped_object, 1.0, 0.0)
         lift_bonus = torch.where(lifted & ~self.lifted_object, 1.0, 0.0)
-        transport_bonus = torch.where(transported & ~self.transported_object, 1.0, 0.0)
-        place_bonus = torch.where(placed, 10.0, 0.0)
+        # transport_bonus = torch.where(transported & ~self.transported_object, 1.0, 0.0)
+        place_bonus = torch.where(placed, 100.0, 0.0)
 
         # Update flags
         self.reached_object |= reached
         self.grasped_object |= grasped
         self.lifted_object |= lifted
-        self.transported_object |= transported
+        # self.transported_object |= transported
         self.placed_object |= placed
 
         # Phase 1: Reach (always active)
@@ -377,27 +382,20 @@ class PickPlaceEnv(GraspEnv):
         # Phase 2: Grasp maintenance
         grasp_reward = torch.where(grasped, 0.5, 0.0)
         # Phase 3: Lift to target height when grasped and not transported yet
-        lift_reward = torch.where(lifted, 0.5, 0.0)
+        lift_reward = torch.where(grasped & lifted & (transport_dist_xy > 0.10), 0.1, 0.0)
 
         # Phase 4: Transport (active only when grasping)
-        transport_xy_reward = torch.where(
-            grasped,
-            5.0 * (self.cfg.max_transport_dist - transport_dist_xy_clamped) / self.cfg.max_transport_dist,
-            0.0
-        )
-        # Phase 5: Place
-        place_reward = torch.where(
-            grasped,
-            10.0 * (1 - torch.tanh(transport_dist / 0.1)),
+        transport_reward = torch.where(
+            grasped & lifted,
+            5.0 * (self.cfg.max_transport_dist - transport_dist_clamped) / self.cfg.max_transport_dist,
             0.0
         )
 
         # Total reward
         task_reward = (reach_reward + reach_bonus + 
               grasp_reward + grasp_bonus + 
-              lift_reward + lift_bonus +
-              transport_xy_reward + transport_bonus + 
-              place_reward + place_bonus)
+              lift_bonus +
+              transport_reward + place_bonus)
         
         # compute penalty terms
         action_l2 = torch.sum(torch.square(self.actions), dim=1)
@@ -409,12 +407,12 @@ class PickPlaceEnv(GraspEnv):
         
         penalty = (
             # Regularization penalties
-            self.cfg.action_l2_w * action_l2 +
-            self.cfg.action_rate_l2_w * action_rate_l2 +
+            0.001 * action_l2 +
+            0.005 * action_rate_l2 +
             # Safety limits
-            self.cfg.joint_pos_limit_w * joint_pos_limit +
-            self.cfg.joint_vel_limit_w * joint_vel_limit +
-            self.cfg.min_link_distance_w * min_link_distance #+
+            0.1 * joint_pos_limit +
+            0.1 * joint_vel_limit +
+            0.1 * min_link_distance #+
             #self.cfg.floor_collision_w * floor_collision_penalty
         )
         reward = task_reward - penalty
@@ -424,14 +422,14 @@ class PickPlaceEnv(GraspEnv):
         print(f"Reach bonus: mean={reach_bonus.mean().item():.2f}, min={reach_bonus.min().item():.2f}, max={reach_bonus.max().item():.2f}")
         print(f"Grasp bonus: mean={grasp_bonus.mean().item():.2f}, min={grasp_bonus.min().item():.2f}, max={grasp_bonus.max().item():.2f}")
         print(f"Lift bonus: mean={lift_bonus.mean().item():.2f}, min={lift_bonus.min().item():.2f}, max={lift_bonus.max().item():.2f}")
-        print(f"Transport bonus: mean={transport_bonus.mean().item():.2f}, min={transport_bonus.min().item():.2f}, max={transport_bonus.max().item():.2f}")
+        # print(f"Transport bonus: mean={transport_bonus.mean().item():.2f}, min={transport_bonus.min().item():.2f}, max={transport_bonus.max().item():.2f}")
         print(f"Place bonus: mean={place_bonus.mean().item():.2f}, min={place_bonus.min().item():.2f}, max={place_bonus.max().item():.2f}")
         
         print(f"Reach reward: mean={reach_reward.mean().item():.2f}, min={reach_reward.min().item():.2f}, max={reach_reward.max().item():.2f}")
         print(f"Grasp reward: mean={grasp_reward.mean().item():.2f}, min={grasp_reward.min().item():.2f}, max={grasp_reward.max().item():.2f}")
         print(f"Lift reward: mean={lift_reward.mean().item():.2f}, min={lift_reward.min().item():.2f}, max={lift_reward.max().item():.2f}")
-        print(f"Transport reward: mean={transport_xy_reward.mean().item():.2f}, min={transport_xy_reward.min().item():.2f}, max={transport_xy_reward.max().item():.2f}")
-        print(f"Place reward: mean={place_reward.mean().item():.2f}, min={place_reward.min().item():.2f}, max={place_reward.max().item():.2f}")
+        # print(f"Transport reward: mean={transport_xy_reward.mean().item():.2f}, min={transport_xy_reward.min().item():.2f}, max={transport_xy_reward.max().item():.2f}")
+        # print(f"Place reward: mean={place_reward.mean().item():.2f}, min={place_reward.min().item():.2f}, max={place_reward.max().item():.2f}")
         
         print(f"Task reward: mean={task_reward.mean().item():.2f}, min={task_reward.min().item():.2f}, max={task_reward.max().item():.2f}")
         print(f"Penalty: mean={penalty.mean().item():.2f}, min={penalty.min().item():.2f}, max={penalty.max().item():.2f}")
@@ -445,7 +443,7 @@ class PickPlaceEnv(GraspEnv):
         print(f"Reached object? {self.reached_object.float().mean().item():.2f}")
         print(f"Grasped object? {self.grasped_object.float().mean().item():.2f}")
         print(f"Lifted object? {self.lifted_object.float().mean().item():.2f}")
-        print(f"Transported object? {self.transported_object.float().mean().item():.2f}")
+        # print(f"Transported object? {self.transported_object.float().mean().item():.2f}")
         print(f"Placed object? {self.placed_object.float().mean().item():.2f} {f'🔥🔥🔥🔥 {placed.sum().item()} envs' if placed.any() else ''}")
         print("-------------------")
         
@@ -503,7 +501,15 @@ class PickPlaceEnv(GraspEnv):
         minimum_link_distance_violation = self._minimum_link_distance(min_dist=0.05).abs() > 0
         # spawn position: 0.74687, 0.17399, 0.015
         # then randomized x": (-0.1, 0.1), "y": (-0.1, 0.1)
-        out_of_bound = self._out_of_bound(in_bound_range={"x": (0.30, 1.0), "y": (-0.5, 0.5), "z": (0.0, 1.0)})
+        out_of_bound = self._out_of_bound(
+            in_bound_range={
+                "x": (0.30, 1.0), 
+                "y": (-0.5, 0.5), 
+                "z": (0.0, 1.0),
+                "roll": (-0.785, 0.785),   # ±45° tilt
+                "pitch": (-0.785, 0.785),  # ±45° tilt
+            }
+        )
         # Robot-floor collision
         floor_collision = self._check_robot_floor_collision()
         is_danger_of_clamping = self._is_danger_of_clamping()
@@ -607,18 +613,28 @@ class PickPlaceEnv(GraspEnv):
         self,
         in_bound_range: dict[str, tuple[float, float]] = {},
     ) -> torch.Tensor:
-        """Termination condition for the object falls out of bound.
+        """Termination condition for the object falls out of bound or tips over.
 
         Args:
-            in_bound_range: The range in x, y, z such that the object is considered in range
+            in_bound_range: The range in x, y, z, roll, pitch, yaw such that the object is considered in bounds.
+                        Keys: "x", "y", "z", "roll", "pitch", "yaw"
+                        Values: (min, max) tuples
+                        Missing keys default to no constraint (very large range)
         """
         object_frame = self.scene['object_frame']
         object_pos_local = object_frame.data.target_pos_source[..., 0, :]
+        object_quat_local = object_frame.data.target_quat_source[..., 0, :]
 
-        range_list = [in_bound_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z"]]
+        # Get position and orientation
+        roll, pitch, yaw = math_utils.euler_xyz_from_quat(object_quat_local)
+        pose = torch.stack([object_pos_local[:, 0], object_pos_local[:, 1], object_pos_local[:, 2], 
+                            roll, pitch, yaw], dim=1)  # (num_envs, 6)
+
+        # Check bounds (default to very large range = no constraint)
+        range_list = [in_bound_range.get(key, (-1e6, 1e6)) for key in ["x", "y", "z", "roll", "pitch", "yaw"]]
         ranges = torch.tensor(range_list, device=self.device)
 
-        outside_bounds = ((object_pos_local < ranges[:, 0]) | (object_pos_local > ranges[:, 1])).any(dim=1)
+        outside_bounds = ((pose < ranges[:, 0]) | (pose > ranges[:, 1])).any(dim=1)
         return outside_bounds
     
     def _print_stage_summary(self, env_ids: Sequence[int]):
