@@ -478,6 +478,26 @@ class ReachEnv(DirectRLEnv):
         # penalty = number of violating pairs
         return num_violations_each_env.float()
     
+    def _check_robot_floor_collision(self, floor_threshold: float = 0.015,
+        links=['shoulder_link', 'upper_arm_link', 'forearm_link', 'wrist_1_link', 'wrist_2_link', 'wrist_3_link', 'robotiq_hande_coupler', 'robotiq_hande_link', 'robotiq_hande_end', 'robotiq_hande_left_finger', 'robotiq_hande_right_finger']
+        ) -> torch.Tensor:
+        """Check if any robot link is colliding with the floor.
+        
+        Returns:
+            Boolean tensor indicating which environments have floor collisions.
+        """
+        link_idxs = self.robot.find_bodies(links)[0]
+        # Get all link positions in world frame
+        link_pos_w = self.robot.data.body_link_pos_w[:, link_idxs]   # (N, K, 3)
+        link_pos_w_z = link_pos_w[:, :, 2]  # (N, K)
+        
+        # Check if any link's z-position is below a safety threshold
+        # Robot's lowest expected height above ground plane
+        
+        collision = (link_pos_w_z < floor_threshold).any(dim=1)
+        
+        return collision
+    
     def _action_rate_limit(self, joint_ids: list, action_diff: torch.Tensor, threshold_ratio: float = 0.1,
     ) -> torch.Tensor:
         """Penalize action rate changes exceeding a threshold ratio of joint velocity limits.

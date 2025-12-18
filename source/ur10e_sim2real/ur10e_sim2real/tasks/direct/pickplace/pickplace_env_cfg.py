@@ -85,7 +85,7 @@ class PickPlaceEnvCfg(GraspEnvCfg):
     joint_pos_limit_w = 0.1
     joint_vel_limit_w = 0.1
     min_link_distance_w = 0.1
-    floor_collision_w = 0.2
+    floor_collision_w = 0.1
 
     # thresholds
     reach_pos_threshold = 0.02 # 2 cm
@@ -114,7 +114,7 @@ class PickPlaceEnvCfg(GraspEnvCfg):
 @configclass
 class PickPlaceEnvPlayCfg(PickPlaceEnvCfg):
     """Configuration for grasp environment during play/testing."""
-    episode_length_s = 3.0 # ~375 steps @ 125 Hz
+    episode_length_s = 2.4 # ~300 steps @ 125 Hz
     num_envs = 1
     randomize_joints = False
     viewer = ViewerCfg(eye = (12.0, 1.0, 1.5), lookat = (0.0, 0.0, 0.0))

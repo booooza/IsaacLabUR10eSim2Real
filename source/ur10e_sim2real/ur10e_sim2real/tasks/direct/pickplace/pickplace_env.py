@@ -383,21 +383,18 @@ class PickPlaceEnv(GraspEnv):
         grasp_reward = torch.where(grasped, 0.5, 0.0)
         # Phase 3: Lift to target height when grasped and not transported yet
         lift_reward = torch.where(grasped & lifted & (transport_dist_xy > 0.10), 0.1, 0.0)
-
         # Phase 4: Transport (active only when grasping)
         transport_reward = torch.where(
             grasped & lifted,
             5.0 * (self.cfg.max_transport_dist - transport_dist_clamped) / self.cfg.max_transport_dist,
             0.0
         )
-
-        # Total reward
+        # Total task reward
         task_reward = (reach_reward + reach_bonus + 
               grasp_reward + grasp_bonus + 
-              lift_bonus +
-              transport_reward + place_bonus)
+              lift_bonus + transport_reward + place_bonus)
         
-        # compute penalty terms
+        # Penalty terms
         action_l2 = torch.sum(torch.square(self.actions), dim=1)
         action_rate_l2 = torch.sum(torch.square(self.actions - self.previous_actions), dim=1)
         joint_pos_limit = self._joint_pos_limits(self.joint_ids)
@@ -412,13 +409,12 @@ class PickPlaceEnv(GraspEnv):
             # Safety limits
             0.1 * joint_pos_limit +
             0.1 * joint_vel_limit +
-            0.1 * min_link_distance #+
-            #self.cfg.floor_collision_w * floor_collision_penalty
+            0.1 * min_link_distance +
+            0.1 * floor_collision_penalty
         )
         reward = task_reward - penalty
 
         print("--- Reward Debug ---")
-        
         print(f"Reach bonus: mean={reach_bonus.mean().item():.2f}, min={reach_bonus.min().item():.2f}, max={reach_bonus.max().item():.2f}")
         print(f"Grasp bonus: mean={grasp_bonus.mean().item():.2f}, min={grasp_bonus.min().item():.2f}, max={grasp_bonus.max().item():.2f}")
         print(f"Lift bonus: mean={lift_bonus.mean().item():.2f}, min={lift_bonus.min().item():.2f}, max={lift_bonus.max().item():.2f}")
