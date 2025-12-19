@@ -356,7 +356,7 @@ class PickPlaceEnv(GraspEnv):
         reached = (reach_dist < self.cfg.reach_pos_threshold) & (reach_rot_error < self.cfg.reach_rot_threshold)
         grasped = gripper_contact_detected
         lifted = lift_height > self.cfg.minimal_lift_height
-        # transported = (transport_dist_xy < self.cfg.transport_pos_threshold)
+        transported = (transport_dist_xy < self.cfg.transport_pos_threshold)
         
         # Object must be stable (low velocity)
         object_vel = self.scene.rigid_objects['object'].data.root_lin_vel_w
@@ -367,14 +367,14 @@ class PickPlaceEnv(GraspEnv):
         reach_bonus = torch.where(reached & ~self.reached_object, 1.0, 0.0)
         grasp_bonus = torch.where(grasped & ~self.grasped_object, 1.0, 0.0)
         lift_bonus = torch.where(lifted & ~self.lifted_object, 1.0, 0.0)
-        # transport_bonus = torch.where(transported & ~self.transported_object, 1.0, 0.0)
+        transport_bonus = torch.where(transported & ~self.transported_object, 1.0, 0.0)
         place_bonus = torch.where(placed, 100.0, 0.0)
 
         # Update flags
         self.reached_object |= reached
         self.grasped_object |= grasped
         self.lifted_object |= lifted
-        # self.transported_object |= transported
+        self.transported_object |= transported
         self.placed_object |= placed
 
         # Phase 1: Reach (always active)
@@ -390,9 +390,15 @@ class PickPlaceEnv(GraspEnv):
             0.0
         )
         # Total task reward
-        task_reward = (reach_reward + reach_bonus + 
-              grasp_reward + grasp_bonus + 
-              lift_bonus + transport_reward + place_bonus)
+        task_reward = (
+            reach_reward 
+            + reach_bonus 
+            + grasp_reward 
+            + grasp_bonus 
+            + lift_bonus 
+            + transport_reward 
+            + place_bonus
+        )
         
         # Penalty terms
         action_l2 = torch.sum(torch.square(self.actions), dim=1)
@@ -400,7 +406,7 @@ class PickPlaceEnv(GraspEnv):
         joint_pos_limit = self._joint_pos_limits(self.joint_ids)
         joint_vel_limit = self._joint_vel_limits(self.joint_ids, soft_ratio=1.0)
         min_link_distance = self._minimum_link_distance(min_dist=0.1)
-        floor_collision_penalty = torch.where(self._check_robot_floor_collision(floor_threshold=self.table_height), 1.0, 0.0)
+        # floor_collision_penalty = torch.where(self._check_robot_floor_collision(floor_threshold=self.table_height), 1.0, 0.0)
         
         penalty = (
             # Regularization penalties
@@ -409,8 +415,8 @@ class PickPlaceEnv(GraspEnv):
             # Safety limits
             0.1 * joint_pos_limit +
             0.1 * joint_vel_limit +
-            0.1 * min_link_distance +
-            0.1 * floor_collision_penalty
+            0.1 * min_link_distance # +
+            # 0.1 * floor_collision_penalty
         )
         reward = task_reward - penalty
 

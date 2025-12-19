@@ -45,41 +45,47 @@ memory:
 # https://skrl.readthedocs.io/en/latest/api/agents/ppo.html
 agent:
   class: PPO
-  rollouts: 24
-  learning_epochs: 8
-  mini_batches: 4
-  discount_factor: 0.99
-  lambda: 0.95
-  learning_rate: 1.0e-04
-  learning_rate_scheduler: KLAdaptiveLR
-  learning_rate_scheduler_kwargs:
+  rollouts: 24  # number of rollouts before updating
+  learning_epochs: 8  # number of learning epochs during each update
+  mini_batches: 4 # number of mini batches during each learning epoch
+  discount_factor: 0.99 # discount factor (gamma)
+  lambda: 0.95 # TD(lambda) coefficient (lam) for computing returns and advantages
+  learning_rate: 1.0e-04 # learning rate
+  learning_rate_scheduler: KLAdaptiveLR # learning rate scheduler class (see torch.optim.lr_scheduler)
+  learning_rate_scheduler_kwargs:  # learning rate scheduler's kwargs (e.g. {"step_size": 1e-3})
     kl_threshold: 0.01
-  state_preprocessor: RunningStandardScaler
-  state_preprocessor_kwargs: null
-  value_preprocessor: RunningStandardScaler
-  value_preprocessor_kwargs: null
-  random_timesteps: 0
-  learning_starts: 0
-  grad_norm_clip: 1.0
-  ratio_clip: 0.2
-  value_clip: 0.2
-  clip_predicted_values: True
-  entropy_loss_scale: 0.001
-  value_loss_scale: 2.0
-  kl_threshold: 0.0
-  rewards_shaper_scale: 0.01
-  time_limit_bootstrap: False
+  state_preprocessor: RunningStandardScaler # state preprocessor class (see skrl.resources.preprocessors)
+  state_preprocessor_kwargs: null # state preprocessor's kwargs (e.g. {"size": env.observation_space})
+  value_preprocessor: RunningStandardScaler # value preprocessor class (see skrl.resources.preprocessors)
+  value_preprocessor_kwargs: null # value preprocessor's kwargs (e.g. {"size": 1})
+  random_timesteps: 0 # random exploration steps
+  learning_starts: 0 # learning starts after this many steps
+  grad_norm_clip: 1.0 # clipping coefficient for the norm of the gradients
+  ratio_clip: 0.2  # clipping coefficient for computing the clipped surrogate objective
+  value_clip: 0.2 # clipping coefficient for computing the value loss (if clip_predicted_values is True)
+  clip_predicted_values: True # clip predicted values during value loss computation
+  entropy_loss_scale: 0.001 # entropy loss scaling factor
+  value_loss_scale: 2.0 # value loss scaling factor
+  kl_threshold: 0.0 # KL divergence threshold for early stopping
+  rewards_shaper_scale: 1.0 # rewards shaping scale
+  time_limit_bootstrap: False # bootstrap at timeout termination (episode truncation)
   # logging and checkpoint
   experiment:
-    directory: "pickplace_direct_skrl"
-    experiment_name: ""
-    write_interval: 100 # every episode
-    checkpoint_interval: 10000 # every 50 episodes
+    directory: "pickplace_direct_skrl_2" # experiment's parent directory
+    experiment_name: "" # experiment name
+    write_interval: 100 # TensorBoard writing interval (timesteps)
+    checkpoint_interval: 1000 # interval for checkpoints (timesteps)
+    store_separately: False # whether to store checkpoints separately
+    wandb: False  # whether to use Weights & Biases
+    wandb_kwargs:  # wandb kwargs (see https://docs.wandb.ai/ref/python/init)
+      entity: a
+      project: b
+      sync_tensorboard: True
 
 
 # Sequential trainer
 # https://skrl.readthedocs.io/en/latest/api/trainers/sequential.html
 trainer:
   class: SequentialTrainer
-  timesteps: 750000 # 1000 * 750
+  timesteps: 75000 # 1000 * 100
   environment_info: log
