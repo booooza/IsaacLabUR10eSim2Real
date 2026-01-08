@@ -92,14 +92,22 @@ class ReachEnvCfg(DirectRLEnvCfg):
     distance_l2_w = -0.2
     orientation_error_w = -0.1
     # penalties
-    action_l2_w = -0.001
-    action_rate_l2_w = -0.005
-    joint_pos_limit_w = -1.0
-    joint_vel_limit_w = -1.0
-    min_link_distance_w = -1.0
-    success_bonus_w = 10.0
+    action_l2_w = 0.00001
+    action_rate_l2_w = 0.00001
+    joint_pos_limit_w = 0.1
+    joint_vel_limit_w = 0.1
+    min_link_distance_w = 0.1
+    reach_bonus_w = 10.0
+    success_bonus_w = 100.0
+
+    # domain randomization
+    target_pose_range = {"x": (-0.25, 0.25), "y": (-0.25, 0.25), "yaw": (-3.14, 3.14)}
+    joint_pos_range = (-1.0, 1.0)
 
     randomize_joints = True
+    # experiments
+    observations = 'symmetric'
+    reward_variant = 'full'
 
     # target 
     target_cfg = VisualizationMarkersCfg(

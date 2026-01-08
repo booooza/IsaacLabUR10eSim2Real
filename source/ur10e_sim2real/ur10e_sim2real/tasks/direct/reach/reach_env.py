@@ -23,6 +23,7 @@ from isaaclab.markers import SPHERE_MARKER_CFG, VisualizationMarkers
 from isaaclab.sensors import FrameTransformerCfg
 from isaaclab.utils.math import subtract_frame_transforms
 from isaaclab.utils.math import quat_apply
+from isaaclab.utils.math import quat_error_magnitude, quat_mul, quat_inv
 
 
 class ReachEnv(DirectRLEnv):
@@ -34,6 +35,12 @@ class ReachEnv(DirectRLEnv):
         self.robot = self.scene.articulations["robot"]
         self.joint_ids, _ = self.robot.find_joints(self.cfg.joint_names)
         
+        # Initialize success tracking tensors
+        self.reached_object = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+
+        # Episode tracking
+        self.episode_reward = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+
         # Define joint limits
         if self.cfg.action_type == "position":
             self.joint_limits_lower = self.robot.data.joint_pos_limits[:, self.joint_ids, 0].clone()
@@ -149,24 +156,39 @@ class ReachEnv(DirectRLEnv):
         ee_quat = self.scene['ee_frame'].data.target_quat_source[..., 0, :]  # (num_envs, 4) end-effector orientation quat
         target_pos = self.target_pos  # (num_envs, 3 target position xyz
         target_quat = self.target_quat # (num_envs, 4) target orientation quat
+        target_pos_rel = target_pos - ee_pos
+        target_quat_rel = quat_mul(quat_inv(ee_quat), target_quat)
         previous_actions = self.previous_actions  # (num_envs, 6) previous actions
 
-        obs = torch.cat(
+        full_obs = torch.cat(
             (
                 joint_positions,
                 joint_velocities,
                 ee_pos,
                 ee_quat,
-                target_pos,
-                target_quat,
+                target_pos_rel,
+                target_quat_rel,
                 previous_actions,
             ),
             dim=-1,
         )
+        actor_obs = torch.cat(
+            (
+                ee_pos,
+                ee_quat,
+                target_pos_rel,
+                target_quat_rel,
+                previous_actions,
+            ),
+            dim=-1,
+        )
+        critic_obs = full_obs
 
         # logging
-
-        return {"policy": obs}
+        if self.cfg.observations == "symmetric":
+            return {"policy": full_obs, "critic": full_obs}
+        else:
+            return {"policy": actor_obs, "critic": critic_obs}  
 
     def _get_states(self) -> VecEnvObs | None:
         """Compute and return the states for the environment.
@@ -196,7 +218,7 @@ class ReachEnv(DirectRLEnv):
         # Linear L2 distance reward over the full workspace
         distance_l2 = torch.norm(target_pos - ee_pos, p=2, dim=-1)
         # Tanh reward for precision near the goal
-        std = 0.2 # start guiding with tanh from 20 cm
+        std = 0.3 # start guiding with tanh from 30 cm
         distance_tanh = 1.0 - torch.tanh(distance_l2 / std)
         # Orientation error as the angular error between input quaternions in radians
         orientation_error = quat_error_magnitude(target_quat, ee_quat)
@@ -210,10 +232,15 @@ class ReachEnv(DirectRLEnv):
         action_rate_limit = self._action_rate_limit(self.joint_ids, action_diff, threshold_ratio=0.1)
         joint_vel_l2 = torch.sum(torch.square(self.robot.data.joint_vel[:, self.joint_ids]), dim=1)
         joint_pos_limit = self._joint_pos_limits(self.joint_ids)
-        joint_vel_limit = self._joint_vel_limits(self.joint_ids, soft_ratio=1.0)
-        min_link_distance = self._minimum_link_distance(min_dist=0.1)
+        joint_vel_limit = self._joint_vel_limits(self.joint_ids, soft_ratio=0.9)
 
         # --- Sparse ---
+        # Compute bonuses before updating success flags
+        reach_bonus = torch.where(reach_success, 1.0, 0.0)
+        success_bonus = torch.where(reach_success & ~self.reached_object, 1.0, 0.0)
+
+        # Update flags
+        self.reached_object |= reach_success
         # Update consecutive_successes
         self.consecutive_successes = torch.where(
             reach_success,
@@ -221,26 +248,45 @@ class ReachEnv(DirectRLEnv):
             torch.zeros_like(self.consecutive_successes)
         )
         stable_success = self.consecutive_successes >= self.cfg.success_bonus_stable_steps
-        success_bonus = torch.where(
+        stable_success_bonus = torch.where(
             stable_success & (~self.episode_success), # bonus only once per episode if stable for n steps
             torch.ones_like(reach_success),
             torch.zeros_like(reach_success)
         )
         # --- Total weighted reward ---
-        reward = (
-            # Task rewards
-            self.cfg.distance_l2_w * distance_l2 +
-            self.cfg.orientation_error_w * orientation_error
+        if self.cfg.reward_variant == "full":
+            task_reward = (
+                # Task rewards
+                self.cfg.distance_l2_w * distance_l2 +
+                self.cfg.orientation_error_w * orientation_error +
+                self.cfg.reach_bonus_w * reach_bonus +
+                # Success bonus
+                self.cfg.success_bonus_w * success_bonus
+            )
+        elif self.cfg.reward_variant == "dense_only":
+            task_reward = (
+                # Task rewards
+                self.cfg.distance_l2_w * distance_l2 +
+                self.cfg.orientation_error_w * orientation_error +
+                reach_bonus
+            )
+        elif self.cfg.reward_variant == "success_only":
+            task_reward = (self.cfg.success_bonus_w * success_bonus)
+        elif self.cfg.reward_variant == "positive_only":
+            proximity_reward = 5.0 * torch.exp(-3.0 * distance_l2)
+            orientation_reward = 1.0 - (orientation_error / torch.pi)
+            task_reward = proximity_reward + orientation_reward + self.cfg.success_bonus_w * success_bonus
+
+        penalty = (        
             # Regularization penalties
-            # self.cfg.action_l2_w * action_l2 +
-            # self.cfg.action_rate_l2_w * action_rate_l2 +
+            self.cfg.action_l2_w * action_l2 +
+            # self.cfg.action_rate_l2_w * action_rate_limit +
             # Safety limits
-            # self.cfg.joint_pos_limit_w * joint_pos_limit +
-            # self.cfg.joint_vel_limit_w * joint_vel_limit +
-            # self.cfg.min_link_distance_w * min_link_distance +
-            # Success bonus
-            # self.cfg.success_bonus_w * success_bonus
+            self.cfg.joint_pos_limit_w * joint_pos_limit +
+            self.cfg.joint_vel_limit_w * joint_vel_limit
         )
+
+        reward = task_reward - penalty
 
         # --- Logging ---
         self.episode_reward += reward
@@ -258,36 +304,46 @@ class ReachEnv(DirectRLEnv):
         self.extras["Debug/action_max"] = self.actions.abs().max().item()
         self.extras["Debug/reward"] = reward.mean().item()
 
-        if reach_success.any():
-            print(f"Reached goal pose for {reach_success.sum().item()} envs.")
-        if stable_success.any():
-            print(f"Reached stable goal pose for {stable_success.sum().item()} envs.")
+        print("--- Reward Debug ---")
+        print(f"Common Step Counter: {self.common_step_counter}")
+        print(f"Task reward: mean={task_reward.mean().item():.2f}, min={task_reward.min().item():.2f}, max={task_reward.max().item():.2f}")
+        print(f"Penalty: mean={penalty.mean().item():.2f}, min={penalty.min().item():.2f}, max={penalty.max().item():.2f}")
+        print(f"Action L2: {(self.cfg.action_l2_w * action_l2).mean():.2f}")
+        print(f"Action rate: {(self.cfg.action_rate_l2_w * action_rate_l2).mean():.2f}")
+        print(f"Joint pos limit: {(self.cfg.joint_pos_limit_w * joint_pos_limit).mean():.2f}")
+        print(f"Joint vel limit: {(self.cfg.joint_vel_limit_w * joint_vel_limit).mean():.2f}")
+        print(f"Total reward: mean={reward.mean().item():.2f}, min={reward.min().item():.2f}, max={reward.max().item():.2f}")
 
-        if self.common_step_counter % 1000 == 0:
-            env_id = 0
+        print(f"Reach distance: mean={distance_l2.mean().item():.2f}, min={distance_l2.min().item():.2f}, max={distance_l2.max().item():.2f}")
+        print(f"Reach rotation error: mean={orientation_error.mean().item():.2f}, min={orientation_error.min().item():.2f}, max={orientation_error.max().item():.2f}")
+
+        print(f"Reached object? {self.reached_object.float().mean().item():.2f}")
+
+        # if self.common_step_counter % 1000 == 0:
+        #     env_id = 0
             
-            # Current state
-            ee_pos = self.scene['ee_frame'].data.target_pos_w[env_id, 0, :3]
-            target_pos = self.target_pos_w[env_id]  # (num_envs, 3 target position xyz
-            joint_pos = self.robot.data.joint_pos[env_id, self.joint_ids]
+        #     # Current state
+        #     ee_pos = self.scene['ee_frame'].data.target_pos_w[env_id, 0, :3]
+        #     target_pos = self.target_pos_w[env_id]  # (num_envs, 3 target position xyz
+        #     joint_pos = self.robot.data.joint_pos[env_id, self.joint_ids]
             
-            print(f"\n=== Env {env_id} ===")
-            print(f"EE pos: {ee_pos}")
-            print(f"Target pos: {target_pos}")
-            print(f"Distance: {torch.norm(target_pos - ee_pos).item():.4f}m")
-            print(f"Joint pos: {joint_pos}")
-            print(f"Joint pos (deg): {joint_pos * 180 / 3.14159}")
+        #     print(f"\n=== Env {env_id} ===")
+        #     print(f"EE pos: {ee_pos}")
+        #     print(f"Target pos: {target_pos}")
+        #     print(f"Distance: {torch.norm(target_pos - ee_pos).item():.4f}m")
+        #     print(f"Joint pos: {joint_pos}")
+        #     print(f"Joint pos (deg): {joint_pos * 180 / 3.14159}")
             
-            # Check if any joint near limits
-            limits = self.robot.data.soft_joint_pos_limits[env_id, self.joint_ids]
-            margin_lower = joint_pos - limits[:, 0]
-            margin_upper = limits[:, 1] - joint_pos
-            print(f"Margin to lower limits: {margin_lower}")
-            print(f"Margin to upper limits: {margin_upper}")
+        #     # Check if any joint near limits
+        #     limits = self.robot.data.soft_joint_pos_limits[env_id, self.joint_ids]
+        #     margin_lower = joint_pos - limits[:, 0]
+        #     margin_upper = limits[:, 1] - joint_pos
+        #     print(f"Margin to lower limits: {margin_lower}")
+        #     print(f"Margin to upper limits: {margin_upper}")
             
-            # Check if any joint is limiting progress
-            if (margin_lower < 0.2).any() or (margin_upper < 0.2).any():
-                print("⚠️ JOINT NEAR LIMIT!")
+        #     # Check if any joint is limiting progress
+        #     if (margin_lower < 0.2).any() or (margin_upper < 0.2).any():
+        #         print("⚠️ JOINT NEAR LIMIT!")
 
         return reward
 
@@ -383,10 +439,12 @@ class ReachEnv(DirectRLEnv):
         self._log_episode_stats(env_ids)
         self._reset_target_pose(env_ids)
         if self.cfg.randomize_joints:
-            self.__reset_joints_by_offset(env_ids, position_range=(-1.0, 1.0))
+            self.__reset_joints_by_offset(env_ids, position_range=self.cfg.joint_pos_range)
         else:
             self._reset_articulation(env_ids)
         self._reset_episode_stats()
+        # Reset success flags for the reset environments
+        self.reached_object[env_ids] = False
 
     def _joint_pos_limits(self, joint_ids: list) -> torch.Tensor:
         """Penalize joint positions if they cross the soft limits.
@@ -400,7 +458,7 @@ class ReachEnv(DirectRLEnv):
         out_of_limits += (
             self.robot.data.joint_pos[:, joint_ids] - self.robot.data.soft_joint_pos_limits[:, joint_ids, 1]
         ).clip(min=0.0)
-        
+        out_of_limits_clip = out_of_limits.clip(min=0.0, max=1.0)
         violations = (out_of_limits > 0.01).any(dim=1)
         
         if violations.any():
@@ -412,7 +470,7 @@ class ReachEnv(DirectRLEnv):
             # print(f"⚠️  Joint position limit violations in {num_violations}/{self.num_envs} envs "
             #     f"(max excess: {out_of_limits.max().item():.4f} rad)")
         
-        return torch.sum(out_of_limits, dim=1)
+        return torch.sum(out_of_limits_clip, dim=1)
 
     def _joint_vel_limits(self, joint_ids: list, soft_ratio: float) -> torch.Tensor:
         """Penalize joint velocities if they cross the soft limits."""
@@ -604,6 +662,11 @@ class ReachEnv(DirectRLEnv):
         self.extras["Stats/consecutive_successes"] = self.consecutive_successes.float().mean().item()
         self.extras["Stats/distance_l2"] = self.distance_l2.mean().item()
         self.extras["Stats/orientation_error"] = self.orientation_error.mean().item()
+
+        # Compute success rates for the environments being reset
+        reach_rate = self.reached_object[env_ids].float().mean().item()
+        # Log current episode metrics
+        self.extras["episode/reach_rate"] = reach_rate
 
     def _reset_episode_stats(self):
         self.episode_reward = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)

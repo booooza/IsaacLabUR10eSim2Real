@@ -1,89 +1,116 @@
+# ur10e_reach_sac_part2.yaml
 params:
   seed: 42
 
-  # environment wrapper clipping
   env:
-    # added to the wrapper
     clip_observations: 100.0
-    # can make custom wrapper?
-    clip_actions: 1.0
+    clip_actions: 100.0
 
   algo:
     name: sac
-
+  
   model:
     name: soft_actor_critic
-
+    
   network:
     name: soft_actor_critic
     separate: True
-    log_std_bounds: [-5, 2]
+    
     space:
       continuous:
         mu_activation: None
         sigma_activation: None
-
         mu_init:
           name: default
         sigma_init:
           name: const_initializer
-          val: -3
-        fixed_sigma: False
-        
+          val: 0  # Part II uses 0
+        fixed_sigma: False  # CHANGED: SAC learns std
+    
     mlp:
-      units: [256, 256]
-      activation: relu
+      units: [512, 256, 128]  # CHANGED: Larger network from Part II
+      activation: elu  # CHANGED: Part II uses elu
       d2rl: False
-
       initializer:
         name: default
       regularizer:
         name: None
-
-  load_checkpoint: False # flag which sets whether to load the checkpoint
-  load_path: '' # path to the checkpoint to load
-
+    
+    log_std_bounds: [-20, 2]  # Part II range
+  
+  load_checkpoint: False
+  load_path: ''
+  
   config:
-    name: reach_direct
+    name: ur10e_reach_sac_part2
     env_name: rlgpu
     device: 'cuda:0'
     device_name: 'cuda:0'
     multi_gpu: False
-
-    # SAC-specific required parameters
+    mixed_precision: False
     normalize_input: True
-    num_actors: -1  # Set from script based on num_envs
+    normalize_value: False  # Not used in SAC
+    num_actors: -1  # Use all available envs
     
-    # SAC hyperparameters (from SACAgent.__init__)
-    gamma: 0.99
-    critic_tau: 0.005  # Soft update coefficient for target network
-    batch_size: 512  # Samples per update from replay buffer
+    # Part II hyperparameters for speed
+    gamma: 0.983  # CHANGED: Lower from Part II (was 0.99)
+    tau: 0.0023  # CHANGED: Part II value (was 0.005)
+    critic_tau: 0.0023  # Same as tau
     
-    # Learning rates
-    actor_lr: 0.0003
-    critic_lr: 0.0003
-    alpha_lr: 0.0003  # Temperature parameter learning rate
+    # Learning rates - Part II
+    learning_rate: 0.00045  # Part II value
+    actor_lr: 0.00045
+    critic_lr: 0.00045
+    alpha_lr: 0.00045  # entropy_learning_rate
     
-    # Temperature (entropy) settings
-    init_alpha: 0.2  # Initial temperature
+    # CRITICAL: Initial alpha from Part II
+    init_alpha: 0.0095  # CHANGED: Part II value (was 1.0)
     learnable_temperature: True
-    target_entropy_coef: 1.0  # Multiplier for target entropy
+    
+    # Batch and gradient steps - Part II
+    batch_size: 512  # Part II value
+    num_steps_per_episode: 1  # Collect 1 step before update
+    steps_num: 32  # CHANGED: 32 gradient steps (Part II)
     
     # Replay buffer
-    replay_buffer_size: 1000000
-    num_warmup_steps: 1000  # Random exploration epochs before training
+    replay_buffer_size: 2000000  # CHANGED: Part II uses 2M
     
-    # Episode settings
-    num_steps_per_episode: 1  # Steps before update (SAC updates after each step)
-    max_env_steps: 1000  # Max steps per episode (for timeout detection)
+    # Warmup
+    num_seed_steps: 0  # Use random_timesteps instead
+    num_warmup_steps: 2000  # CHANGED: Part II learning_starts
     
-    # Training
-    max_epochs: 15000  # Much higher than PPO since each epoch is shorter
+    # Training schedule
+    max_epochs: 100000
     max_frames: -1
-    save_best_after: 100
-    save_frequency: 100
-    print_stats: True
+    horizon_length: 1  # Not used in off-policy
     
-    # Reward shaping
+    save_best_after: 1000
+    save_frequency: 5000
+    print_stats: True
+    use_diagnostics: True
+
+  
+    grad_norm: 0  # Part II doesn't use grad clipping
+    truncate_grads: False
+    
     reward_shaper:
-      scale_value: 1.0
+      scale_value: 1.0  # Don't scale rewards
+
+  experiment:
+    directory: "runs/ur10e_sac_part2"
+    full_experiment_name: ""  # Will be auto-generated with timestamp
+    train_dir: ""  # Will be set by training script
+    experiment_name: ""
+    write_interval: 1
+    wandb: False
+    wandb_kwargs:
+      entity: your_entity
+      project: ur10e_reach
+      name: sac_part2_2048envs
+      sync_tensorboard: True
+  
+    # Player config for evaluation
+    player:
+      deterministic: True
+      games_num: 100
+      print_stats: True
