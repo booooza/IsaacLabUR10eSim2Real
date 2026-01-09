@@ -65,15 +65,14 @@ class GraspSceneCfg(ReachSceneCfg):
         init_state=ArticulationCfg.InitialStateCfg(
             joint_pos={
                 # UR10e arm joints
-                    "shoulder_pan_joint": 0.0,
-                    "shoulder_lift_joint": -1.10,
-                    "elbow_joint": 2.0,
-                    "wrist_1_joint": -2.5,
-                    "wrist_2_joint": -1.57,
-                    "wrist_3_joint": 0.0,
-                    # HandE gripper joints (open position)
-                    "robotiq_hande_left_finger_joint": 0.025,
-                    "robotiq_hande_right_finger_joint": 0.025,
+                "shoulder_pan_joint": 0.0,
+                "shoulder_lift_joint": -1.57, # -90 degrees
+                "elbow_joint": 1.57, # 90 degrees
+                "wrist_1_joint": -1.57, # -90 degrees
+                "wrist_2_joint": -1.57, # -90 degrees
+                "wrist_3_joint": 0.0,
+                "robotiq_hande_left_finger_joint": 0.025,
+                "robotiq_hande_right_finger_joint": 0.025,
             },
             pos=(0.0, 0.0, 0.0),
             rot=(1.0, 0.0, 0.0, 0.0),
@@ -185,7 +184,7 @@ class GraspSceneCfg(ReachSceneCfg):
                 ),
             ),
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(0.74687, 0.17399, 0.015), # Center of the workspace (60cm in front of robot base)
+            pos=(0.60, -0.25, 0.015),  # Front-left of robot (60cm in front of robot base)
             rot=(1, 0, 0, 0)
         ),
     )

@@ -28,21 +28,21 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 class GraspEnvCfg(ReachEnvCfg):
     # - spaces definition
     action_space = gym.spaces.Box(
-        low=np.array([-2.0944, -2.0944, -3.14159, -3.14159, -3.14159, -3.14159, -1]), 
-        high=np.array([2.0944, 2.0944, 3.14159, 3.14159, 3.14159, 3.14159, 1]), 
+        low=np.array([-2.0944, -2.0944, -3.14159, -3.14159, -3.14159, -3.14159, -3.14159]), 
+        high=np.array([2.0944, 2.0944, 3.14159, 3.14159, 3.14159, 3.14159, 3.14159]), 
         shape=(7,), dtype=np.float32
     )
     observation_space = gym.spaces.Box(
         low=np.array([
             -6.28319, -6.28319, -6.28319, -6.28319, -6.28319, -6.28319, # 6 joint positions
             -2.0944, -2.0944, -3.14159, -3.14159, -3.14159, -3.14159, # 6 joint velocities
-            -1300, -1300, -1300, # 3 object position xyz
+            -1.3, -1.3, -1.3, # 3 ee position xyz
+            -1, -1, -1, -1, # 4 ee orientation quat
+            -1.3, -1.3, -1.3, # 3 object position xyz
             -1, -1, -1, -1, # 4 object orientation quat
-            -1300, -1300, -1300, # 3 target position xyz
-            -1, -1, -1, -1, # 4 target orientation quat
             -1, # 1 gripper position (-1 fully closed)
             -1, # 1 target width gripper max width normalized
-            -2.0944, -2.0944, -3.14159, -3.14159, -3.14159, -3.14159, -1 # 7 previous actions
+            -2.0944, -2.0944, -3.14159, -3.14159, -3.14159, -3.14159, -3.14159 # 7 previous actions
         ]),
         high=np.array([
             6.28319, 6.28319, 6.28319, 6.28319, 6.28319, 6.28319, # 6 joint positions
@@ -53,7 +53,7 @@ class GraspEnvCfg(ReachEnvCfg):
             1, 1, 1, 1, # 4 target orientation quat
             1, # 1 gripper positions (+1 fully open)
             1, # 1 target width gripper max width normalized
-            2.0944, 2.0944, 3.14159, 3.14159, 3.14159, 3.14159, 1 # 7 previous actions
+            2.0944, 2.0944, 3.14159, 3.14159, 3.14159, 3.14159, 3.14159 # 7 previous actions
         ]), 
         shape=(35,), dtype=np.float64
     )
@@ -65,10 +65,7 @@ class GraspEnvCfg(ReachEnvCfg):
     gripper_joint_names = ["robotiq_hande_left_finger_joint", "robotiq_hande_right_finger_joint"]
 
     # config
-    # UR10e arm joints
-    #     action_scale = [1.0, 1.0, 1.0, 1.5, 1.5, 1.5]
 
-    action_scale = [0.5, 0.5, 0.5, 0.8, 0.8, 0.8]  # Shoulder/elbow: ±0.25 rad range per step, Wrist joints: ±0.4 rad range per step    
     use_default_offset = True
     action_type = "velocity"
     reach_pos_threshold = 0.02 # 2 cm
@@ -82,19 +79,29 @@ class GraspEnvCfg(ReachEnvCfg):
     distance_tanh_w = 0.1
     distance_l2_w = -0.2
     orientation_error_w = -0.1
+    reach_bonus_w = 1.0
+    grasp_bonus_w = 1.0
+    lift_bonus_w = 1.0
     
     grip_width_tanh_w = 0.1
     grip_width_l2_w = -0.2
-    lift_reward_w = 2.0
+
+    grasp_force_threshold = 10.0 # 10 nm
+    grasp_width_threshold = 0.005 # 5 mm
+    minimal_lift_height = 0.04 # 4 cm
 
     # penalties
-    action_l2_w = -0.001
-    action_rate_l2_w = -0.005
-    joint_pos_limit_w = -1.0
-    joint_vel_limit_w = -1.0
-    min_link_distance_w = -1.0
-    success_bonus_w = 10.0
+    action_l2_w = 0.00001
+    action_rate_l2_w = 0.00001
+    joint_pos_limit_w = 0.1
+    joint_vel_limit_w = 0.1
+    min_link_distance_w = 0.1
+    success_bonus_w = 100.0
 
+    randomize_joints = True
+    object_pose_range = {"x": (-0.1, 0.1), "y": (-0.1, 0.1), "yaw": (-3.14, 3.14)}
+    joint_pos_range = (-1.0, 1.0)
+    
     # target 
     target_cfg = VisualizationMarkersCfg(
         prim_path="/Visuals/target",

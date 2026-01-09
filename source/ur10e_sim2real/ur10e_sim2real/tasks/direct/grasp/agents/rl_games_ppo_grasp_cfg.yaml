@@ -3,8 +3,8 @@ params:
 
   # environment wrapper clipping
   env:
-    # can make custom wrapper?
-    clip_actions: 3.14159
+    clip_observations: 100.0
+    clip_actions: 100.0
 
   algo:
     name: a2c_continuous
@@ -41,7 +41,7 @@ params:
   load_path: '' # path to the checkpoint to load
 
   config:
-    name: grasp_direct
+    name: grasp_direct_results
     env_name: rlgpu
     device: 'cuda:0'
     device_name: 'cuda:0'
@@ -61,7 +61,7 @@ params:
     lr_schedule: adaptive
     kl_threshold: 0.01
     score_to_win: 10000
-    max_epochs: 1500
+    max_epochs: 1000
     save_best_after: 100
     save_frequency: 100
     print_stats: True
@@ -75,4 +75,4 @@ params:
     critic_coef: 2
     clip_value: True
     seq_length: 4
-    bounds_loss_coef: 0.001
+    bounds_loss_coef: 0.0001
