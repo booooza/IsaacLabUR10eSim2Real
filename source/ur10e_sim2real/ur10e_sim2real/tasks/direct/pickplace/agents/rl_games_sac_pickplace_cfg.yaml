@@ -14,7 +14,7 @@ params:
   network:
     name: soft_actor_critic
     separate: True
-    log_std_bounds: [-5, 2]
+    log_std_bounds: [-20, 2]
     space:
       continuous:
         mu_activation: None
@@ -24,11 +24,11 @@ params:
           name: default
         sigma_init:
           name: const_initializer
-          val: 0  # Match PPO (was -3)
+          val: 0
         fixed_sigma: False
         
     mlp:
-      units: [256, 128, 64]  # Match PPO (was [256, 256])
+      units: [512, 256, 128] 
       activation: elu        # Match PPO (was relu)
       d2rl: False
 
@@ -59,26 +59,26 @@ params:
     batch_size: 4096  # CHANGED from 512 to 4096
     
     # Learning rates - keep standard SAC rates
-    actor_lr: 0.0003
-    critic_lr: 0.0003
-    alpha_lr: 0.0003
+    actor_lr: 0.001  # CHANGED: match blog post (was 0.0003)
+    critic_lr: 0.001  # CHANGED: match blog post (was 0.0003)
+    alpha_lr: 0.001   # CHANGED: match blog post (was 0.0003)
     
     # CRITICAL FIX #2: Much higher initial exploration
     # PPO has fixed_sigma=True which means constant exploration
     # SAC needs high init_alpha to compensate
-    init_alpha: 0.6  # CHANGED from 0.2 to 0.6 for more exploration
+    init_alpha: 0.006
     learnable_temperature: True
     target_entropy_coef: 1.0
     
     # Replay buffer
-    replay_buffer_size: 1000000
+    num_warmup_steps: 2048
     
     # CRITICAL FIX #3: Longer warmup period
     num_warmup_steps: 5000  # CHANGED from 1000 to 5000
     
     # CRITICAL FIX #4: Collect more steps before updating
-    num_steps_per_episode: 8  # CHANGED from 1 to 8
-    max_env_steps: 1000
+    num_steps_per_episode: 4
+    max_env_steps: 512
     
     # Training - adjusted for num_steps_per_episode=8
     # Total steps: max_epochs * num_steps_per_episode = training budget

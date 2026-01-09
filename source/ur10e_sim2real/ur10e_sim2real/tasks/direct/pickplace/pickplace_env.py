@@ -79,6 +79,10 @@ class PickPlaceEnv(GraspEnv):
         self.target_quat_w = torch.zeros((self.num_envs, 4), device=self.device)
         self.target_quat_w[:, 0] = 1.0 
 
+        self.target_width_open_normalized = 1.0
+        self.target_width_closed_normalized = 2.0 * (self.obj_width / self.gripper_max_width) - 1.0
+        self.target_width = torch.full((self.num_envs, 1), self.target_width_closed_normalized, device=self.device)
+
         # Initialize grasp orientation (top-down)
         object_frame = self.scene['object_frame']
         object_pos_w = object_frame.data.target_pos_w[..., 0, :]
@@ -195,7 +199,7 @@ class PickPlaceEnv(GraspEnv):
         
         # Split actions into arm (6) and gripper (1)
         arm_actions = self.actions[:, :6]  # (num_envs, 6)
-        # gripper_action = self.actions[:, 6:7]  # (num_envs, 1)
+        gripper_action = self.actions[:, 6:7]  # (num_envs, 1)
 
         processed_arm_actions = torch.clamp(
             arm_actions,
@@ -233,25 +237,40 @@ class PickPlaceEnv(GraspEnv):
         #     torch.full((self.num_envs, 1), gripper_open_pos, device=self.device)
         # )
 
-        # # Clamp gripper action to [-1, 1]
-        # gripper_action = torch.clamp(gripper_action, min=-1.0, max=1.0)
-        # # Process gripper action (map from [-1, 1] to actual width, then split between fingers)
-        # gripper_max_width = 0.05
-        # # Map action from [-1, 1] to [0, gripper_max_width]
-        # target_width = (gripper_action + 1.0) / 2.0 * gripper_max_width  # (num_envs, 1)
-        # # Each finger should be at half the total width
-        # finger_position = target_width / 2.0  # (num_envs, 1)
+        # Clamp gripper action to [-1, 1]
+        gripper_action = torch.clamp(gripper_action, min=-1.0, max=1.0)
+        # Process gripper action (map from [-1, 1] to actual width, then split between fingers)
+        gripper_max_width = 0.05
+        # Map action from [-1, 1] to [0, gripper_max_width]
+        target_width = (gripper_action + 1.0) / 2.0 * gripper_max_width  # (num_envs, 1)
+        # Each finger should be at half the total width
+        finger_position = target_width / 2.0  # (num_envs, 1)
         
-        # If object is at target position, override actions to safe home position
+        # # If object is at target position, override actions to open gripper
+        object_height = object_pos[:, 2]
+        lift_height = object_height - self.table_height
         transport_dist = torch.norm(object_pos - self.target_pos_w, dim=-1)
-        placed = (transport_dist < self.cfg.place_pos_threshold) & ~object_grasped
-        
-        if placed.any():
-            # Freeze arm and close gripper
-            placed_env_ids = torch.where(placed)[0]
-            processed_arm_actions[placed] = 0.0
-            finger_position[placed] = gripper_closed_pos
-            
+        transport_dist_xy = torch.norm(object_pos[:, :2] - self.target_pos_w[:, :2], dim=-1)
+        release_object = (transport_dist_xy < self.cfg.place_pos_threshold) & (lift_height <= self.cfg.minimal_lift_height)
+
+        if (self.cfg.auto_release_object & release_object.any()):
+            # Object must be stable (low velocity)
+            object_vel = self.scene.rigid_objects['object'].data.root_lin_vel_w
+            is_stable = torch.norm(object_vel, dim=-1) < 0.05
+            # Freeze arm and open gripper
+            placed_env_ids = torch.where(release_object)[0]
+            processed_arm_actions[release_object] = 0.0
+            finger_position[release_object] = gripper_open_pos
+
+        if self.cfg.auto_freeze_on_success:
+            object_vel = self.scene.rigid_objects['object'].data.root_lin_vel_w
+            is_stable = torch.norm(object_vel, dim=-1) < 0.05
+            placed = (transport_dist < self.cfg.place_pos_threshold) & is_stable & ~object_grasped
+            if placed.any():
+                # Freeze arm and open gripper
+                processed_arm_actions[placed] = 0.0
+                finger_position[placed] = gripper_open_pos
+
         # Combine processed actions: 6 arm joints + 2 gripper fingers (mirrored)
         self.processed_actions = torch.cat(
             (
@@ -293,11 +312,8 @@ class PickPlaceEnv(GraspEnv):
         # target_pos = self.scene['target_frame'].data.target_pos_source[..., 0, :]  # (num_envs, 3)
         # target_quat = self.scene['target_frame'].data.target_quat_source[..., 0, :]  # (num_envs, 4)
         target_pos = self.target_pos  # (num_envs, 3)
-        target_quat = self.target_quat  # (num_envs, 4)
-        
-        # Normalize target width to [-1, 1]
-        target_width_normalized = 2.0 * (self.obj_width / self.gripper_max_width) - 1.0
-        target_width = torch.full((self.num_envs, 1), target_width_normalized, device=self.device)
+        target_quat = self.target_quat  # (num_envs, 4)        
+        target_gripper_width = self.target_width
         
         # Get current gripper width (sum of both finger positions)
         gripper_positions = self.robot.data.joint_pos[:, self.gripper_joint_ids]  # (num_envs, 2)
@@ -310,7 +326,7 @@ class PickPlaceEnv(GraspEnv):
         target_pos_rel = target_pos - obj_pos
         target_quat_rel = quat_mul(quat_inv(obj_quat), target_quat)
 
-        obs = torch.cat(
+        full_obs = torch.cat(
             (
                 joint_positions,          # (num_envs, 6) [-1, 1]
                 joint_velocities,           # (num_envs, 6) 
@@ -320,12 +336,32 @@ class PickPlaceEnv(GraspEnv):
                 obj_quat_rel,                  # (num_envs, 4)
                 target_pos_rel,      # (num_envs, 3)
                 target_quat_rel,              # (num_envs, 4)
+                gripper_width,
+                target_gripper_width,
                 self.previous_actions,    # (num_envs, 7)
             ),
             dim=-1,
         )
+        actor_obs = torch.cat(
+            (
+                ee_pos,                   # (num_envs, 3) try: leave away
+                ee_quat,                  # (num_envs, 4) try: leave away
+                obj_pos_rel,          # (num_envs, 3)
+                obj_quat_rel,                  # (num_envs, 4)
+                target_pos_rel,      # (num_envs, 3)
+                target_quat_rel,              # (num_envs, 4)
+                gripper_width,
+                target_gripper_width,
+                self.previous_actions,    # (num_envs, 7)
+            ),
+            dim=-1,
+        )
+        critic_obs = full_obs
         
-        return {"policy": obs}
+        if self.cfg.observations == "symmetric":
+            return {"policy": full_obs, "critic": full_obs}
+        else:
+            return {"policy": actor_obs, "critic": critic_obs}                
 
     def _get_rewards(self) -> torch.Tensor:
         ee_frame = self.scene['ee_frame']
@@ -335,8 +371,8 @@ class PickPlaceEnv(GraspEnv):
         object_pos = object_frame.data.target_pos_w[..., 0, :]
 
         # Calculations
-        reach_dist = torch.norm(ee_pos - object_pos, dim=-1)
-        reach_rot_error = quat_error_magnitude(self.grasp_quat_w, ee_quat)
+        distance_l2 = torch.norm(ee_pos - object_pos, dim=-1)
+        orientation_error = quat_error_magnitude(self.grasp_quat_w, ee_quat)
 
         contact_forces = self.scene._sensors['contact_sensor']._data.net_forces_w # (num_envs, 2, 3)
         normal_forces = contact_forces[:, :, 1].abs()
@@ -353,7 +389,8 @@ class PickPlaceEnv(GraspEnv):
         transport_dist_xy_clamped = torch.clamp(transport_dist_xy, 0.0, self.cfg.max_transport_dist)
 
         # Phase success / bonus
-        reached = (reach_dist < self.cfg.reach_pos_threshold) & (reach_rot_error < self.cfg.reach_rot_threshold)
+        reached: torch.Tensor = ((distance_l2 < self.cfg.reach_pos_threshold) &
+                 (orientation_error < self.cfg.reach_rot_threshold))
         grasped = gripper_contact_detected
         lifted = lift_height > self.cfg.minimal_lift_height
         transported = (transport_dist_xy < self.cfg.transport_pos_threshold)
@@ -361,44 +398,71 @@ class PickPlaceEnv(GraspEnv):
         # Object must be stable (low velocity)
         object_vel = self.scene.rigid_objects['object'].data.root_lin_vel_w
         is_stable = torch.norm(object_vel, dim=-1) < 0.05
-        placed = (transport_dist_xy < self.cfg.place_pos_threshold) & is_stable & ~grasped
+        placed = (transport_dist < self.cfg.place_pos_threshold) & is_stable & ~grasped
 
         # Compute bonuses before updating success flags
-        reach_bonus = torch.where(reached & ~self.reached_object, 1.0, 0.0)
-        grasp_bonus = torch.where(grasped & ~self.grasped_object, 1.0, 0.0)
-        lift_bonus = torch.where(lifted & ~self.lifted_object, 1.0, 0.0)
-        transport_bonus = torch.where(transported & ~self.transported_object, 1.0, 0.0)
-        place_bonus = torch.where(placed, 100.0, 0.0)
+        reach_bonus = torch.where(reached, 1.0, 0.0)
+        grasp_bonus = torch.where(reached & grasped & (transport_dist > self.cfg.place_pos_threshold), 1.0, 0.0)
+        release_bonus = torch.where(self.grasped_object & ~grasped & (transport_dist < self.cfg.place_pos_threshold), 5.0, 0.0)
+        lift_bonus = torch.where(grasped & lifted & (transport_dist_xy > 0.10), 1.0, 0.0)
+        descent_bonus = torch.where(self.lifted_object & ~lifted & (transport_dist_xy < 0.10), 5.0, 0.0)
+        transport_bonus = torch.where((self.grasped_object & transported), 1.0, 0.0)
+        place_bonus = torch.where((self.transported_object & placed), 10.0, 0.0)
+        success_bonus = torch.where(self.transported_object & placed & ~self.placed_object, 100.0, 0.0)
 
         # Update flags
         self.reached_object |= reached
-        self.grasped_object |= grasped
-        self.lifted_object |= lifted
-        self.transported_object |= transported
-        self.placed_object |= placed
+        self.grasped_object |= (self.reached_object & grasped)  # Only successful if reached already in this episode
+        self.lifted_object |= (self.grasped_object & lifted)    # Only successful if grasped already in this episode
+        self.transported_object |= (self.grasped_object & transported)    # Only successful if grasped already in this episode
+        self.placed_object |= (self.transported_object & placed)
+        # self.target_width = torch.where(
+        #     placed.unsqueeze(-1),
+        #     torch.full((self.num_envs, 1), self.target_width_open_normalized, device=self.device),
+        #     torch.full((self.num_envs, 1), self.target_width_closed_normalized, device=self.device)
+        # )
 
         # Phase 1: Reach (always active)
-        reach_reward = -0.2 * reach_dist - 0.1 * reach_rot_error + torch.where(reached, 0.5, 0.0)
-        # Phase 2: Grasp maintenance
-        grasp_reward = torch.where(grasped, 0.5, 0.0)
-        # Phase 3: Lift to target height when grasped and not transported yet
-        lift_reward = torch.where(grasped & lifted & (transport_dist_xy > 0.10), 0.1, 0.0)
+        reach_reward = self.cfg.distance_l2_w * distance_l2 + self.cfg.orientation_error_w * orientation_error + self.cfg.reach_bonus_w * reach_bonus
+
         # Phase 4: Transport (active only when grasping)
         transport_reward = torch.where(
             grasped & lifted,
             5.0 * (self.cfg.max_transport_dist - transport_dist_clamped) / self.cfg.max_transport_dist,
             0.0
         )
+
         # Total task reward
-        task_reward = (
-            reach_reward 
-            + reach_bonus 
-            + grasp_reward 
-            + grasp_bonus 
-            + lift_bonus 
-            + transport_reward 
-            + place_bonus
-        )
+        if self.cfg.reward_variant == "full":
+            task_reward = (
+                self.cfg.distance_l2_w * distance_l2 +
+                self.cfg.orientation_error_w * orientation_error +
+                self.cfg.reach_bonus_w * reach_bonus +
+                grasp_bonus + lift_bonus
+                + transport_reward 
+                 + descent_bonus + release_bonus
+                + transport_bonus
+                + place_bonus
+                + success_bonus
+            )
+        elif self.cfg.reward_variant == "dense_only":
+            task_reward = (
+                self.cfg.distance_l2_w * distance_l2 +
+                self.cfg.orientation_error_w * orientation_error + 
+                # + grasp_reward 
+                # + lift_reward
+                + transport_reward 
+            )
+        elif self.cfg.reward_variant == "sparse_only":
+            task_reward = (
+                + reach_bonus 
+                + transport_bonus
+                # + grasp_bonus 
+                # + lift_bonus 
+                # + place_bonus
+            )
+        elif self.cfg.reward_variant == "success_only":
+            task_reward = success_bonus
         
         # Penalty terms
         action_l2 = torch.sum(torch.square(self.actions), dim=1)
@@ -408,48 +472,49 @@ class PickPlaceEnv(GraspEnv):
         min_link_distance = self._minimum_link_distance(min_dist=0.1)
         # floor_collision_penalty = torch.where(self._check_robot_floor_collision(floor_threshold=self.table_height), 1.0, 0.0)
         
-        penalty = (
+        penalty = (        
             # Regularization penalties
-            0.001 * action_l2 +
-            0.005 * action_rate_l2 +
+            self.cfg.action_l2_w * action_l2 +
+            # self.cfg.action_rate_l2_w * action_rate_limit +
             # Safety limits
-            0.1 * joint_pos_limit +
-            0.1 * joint_vel_limit +
-            0.1 * min_link_distance # +
-            # 0.1 * floor_collision_penalty
+            self.cfg.joint_pos_limit_w * joint_pos_limit +
+            self.cfg.joint_vel_limit_w * joint_vel_limit
         )
         reward = task_reward - penalty
 
         print("--- Reward Debug ---")
+        print(f"Common Step Counter: {self.common_step_counter}")
         print(f"Reach bonus: mean={reach_bonus.mean().item():.2f}, min={reach_bonus.min().item():.2f}, max={reach_bonus.max().item():.2f}")
         print(f"Grasp bonus: mean={grasp_bonus.mean().item():.2f}, min={grasp_bonus.min().item():.2f}, max={grasp_bonus.max().item():.2f}")
         print(f"Lift bonus: mean={lift_bonus.mean().item():.2f}, min={lift_bonus.min().item():.2f}, max={lift_bonus.max().item():.2f}")
-        # print(f"Transport bonus: mean={transport_bonus.mean().item():.2f}, min={transport_bonus.min().item():.2f}, max={transport_bonus.max().item():.2f}")
+        print(f"Transport bonus: mean={transport_bonus.mean().item():.2f}, min={transport_bonus.min().item():.2f}, max={transport_bonus.max().item():.2f}")
+        print(f"Descent bonus: mean={descent_bonus.mean().item():.2f}, min={descent_bonus.min().item():.2f}, max={descent_bonus.max().item():.2f}")
+        print(f"Release bonus: mean={release_bonus.mean().item():.2f}, min={release_bonus.min().item():.2f}, max={release_bonus.max().item():.2f}")
         print(f"Place bonus: mean={place_bonus.mean().item():.2f}, min={place_bonus.min().item():.2f}, max={place_bonus.max().item():.2f}")
+        print(f"Success bonus: mean={success_bonus.mean().item():.2f}, min={success_bonus.min().item():.2f}, max={success_bonus.max().item():.2f}")
         
         print(f"Reach reward: mean={reach_reward.mean().item():.2f}, min={reach_reward.min().item():.2f}, max={reach_reward.max().item():.2f}")
-        print(f"Grasp reward: mean={grasp_reward.mean().item():.2f}, min={grasp_reward.min().item():.2f}, max={grasp_reward.max().item():.2f}")
-        print(f"Lift reward: mean={lift_reward.mean().item():.2f}, min={lift_reward.min().item():.2f}, max={lift_reward.max().item():.2f}")
-        # print(f"Transport reward: mean={transport_xy_reward.mean().item():.2f}, min={transport_xy_reward.min().item():.2f}, max={transport_xy_reward.max().item():.2f}")
-        # print(f"Place reward: mean={place_reward.mean().item():.2f}, min={place_reward.min().item():.2f}, max={place_reward.max().item():.2f}")
+        print(f"Transport reward: mean={transport_reward.mean().item():.2f}, min={transport_reward.min().item():.2f}, max={transport_reward.max().item():.2f}")
         
         print(f"Task reward: mean={task_reward.mean().item():.2f}, min={task_reward.min().item():.2f}, max={task_reward.max().item():.2f}")
         print(f"Penalty: mean={penalty.mean().item():.2f}, min={penalty.min().item():.2f}, max={penalty.max().item():.2f}")
         print(f"Total reward: mean={reward.mean().item():.2f}, min={reward.min().item():.2f}, max={reward.max().item():.2f}")
         
-        print(f"Reach distance: mean={reach_dist.mean().item():.2f}, min={reach_dist.min().item():.2f}, max={reach_dist.max().item():.2f}")
-        print(f"Reach rotation error: mean={reach_rot_error.mean().item():.2f}, min={reach_rot_error.min().item():.2f}, max={reach_rot_error.max().item():.2f}")
+        print(f"Reach distance: mean={distance_l2.mean().item():.2f}, min={distance_l2.min().item():.2f}, max={distance_l2.max().item():.2f}")
+        print(f"Reach rotation error: mean={orientation_error.mean().item():.2f}, min={orientation_error.min().item():.2f}, max={orientation_error.max().item():.2f}")
+
         print(f"Lift height: mean={lift_height.mean().item():.2f}, min={lift_height.min().item():.2f}, max={lift_height.max().item():.2f}")
         print(f"Transport distance: mean={transport_dist.mean().item():.2f}, min={transport_dist.min().item():.2f}, max={transport_dist.max().item():.2f}")
         
         print(f"Reached object? {self.reached_object.float().mean().item():.2f}")
         print(f"Grasped object? {self.grasped_object.float().mean().item():.2f}")
         print(f"Lifted object? {self.lifted_object.float().mean().item():.2f}")
-        # print(f"Transported object? {self.transported_object.float().mean().item():.2f}")
-        print(f"Placed object? {self.placed_object.float().mean().item():.2f} {f'🔥🔥🔥🔥 {placed.sum().item()} envs' if placed.any() else ''}")
+        print(f"Transported object? {self.transported_object.float().mean().item():.2f}")
+        print(f"Placed object? {self.placed_object.float().mean().item():.2f} {f'🔥 {placed.sum().item()} envs' if placed.any() else ''}")
         print("-------------------")
         
         self.episode_reward += reward
+        self._progress_stages_vectorized(grasped, lifted, placed)
         
         return reward
 
@@ -529,16 +594,20 @@ class PickPlaceEnv(GraspEnv):
         
         self.extras["Termination/time_out"] = time_out.sum().item()
 
+        success = self.placed_object
+
         return died, time_out
     
     def _reset_idx(self, env_ids: Sequence[int] | None):
         if env_ids is None:
             env_ids = self.robot._ALL_INDICES
 
+        # Log before reset
         self._log_episode_stats(env_ids)
+
+        # Call grandparent reset
         DirectRLEnv._reset_idx(self, env_ids)
-        # Reset parent (robot, articulation, stats, etc.)
-        self._reset_episode_stats()
+
         # Reset success flags for the reset environments
         self.reached_object[env_ids] = False
         self.grasped_object[env_ids] = False
@@ -547,7 +616,7 @@ class PickPlaceEnv(GraspEnv):
         self.placed_object[env_ids] = False
         
         if self.cfg.randomize_joints:
-            self.__reset_joints_by_offset(env_ids, position_range=(-1.0, 1.0))
+            self._reset_joints_by_offset(env_ids, position_range=self.cfg.joint_pos_range)
         else:
             self._reset_articulation(env_ids)
 
@@ -570,9 +639,12 @@ class PickPlaceEnv(GraspEnv):
             obj_yaw, # Match object yaw
         )
 
+        # Reset parent (robot, articulation, stats, etc.)
+        self._reset_episode_stats()
+
         # --- Stage summary print ---
 
-    def __reset_joints_by_offset(
+    def _reset_joints_by_offset(
         self,
         env_ids: torch.Tensor,
         position_range: tuple[float, float] = (0.0, 0.0),

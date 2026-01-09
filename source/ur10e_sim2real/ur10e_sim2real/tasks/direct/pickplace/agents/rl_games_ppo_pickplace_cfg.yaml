@@ -45,7 +45,7 @@ params:
   load_path: '' # path to the checkpoint to load
 
   config:
-    name: pickplace_direct_7
+    name: pickplace_direct_results
     env_name: rlgpu
     device: 'cuda:0'
     device_name: 'cuda:0'
@@ -54,28 +54,28 @@ params:
     mixed_precision: False
     normalize_input: True
     normalize_value: True
-    value_bootstrap: False
+    value_bootstrap: True
     num_actors: -1
     reward_shaper:
       scale_value: 1.0
     normalize_advantage: True
     gamma: 0.99
     tau: 0.95
-    learning_rate: 1e-4
+    learning_rate: 0.0001
     lr_schedule: adaptive
     schedule_type: legacy
     kl_threshold: 0.01
     score_to_win: 100000000
     max_epochs: 3000
     save_best_after: 100
-    save_frequency: 50
+    save_frequency: 100
     print_stats: True
     grad_norm: 1.0
-    entropy_coef: 0.001
+    entropy_coef: 0.01
     truncate_grads: True
     e_clip: 0.2
-    horizon_length: 24
-    minibatch_size: 24576
+    horizon_length: 64
+    minibatch_size: 32768
     mini_epochs: 8
     critic_coef: 4
     clip_value: True

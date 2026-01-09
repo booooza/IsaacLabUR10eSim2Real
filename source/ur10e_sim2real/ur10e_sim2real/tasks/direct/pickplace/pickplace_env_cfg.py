@@ -27,13 +27,13 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
 @configclass
 class PickPlaceEnvCfg(GraspEnvCfg):
-    decimation = 1
+    decimation = 2
     seed = None
     # - spaces definition
     action_space = gym.spaces.Box(
-        low=np.array([-2.0944, -2.0944, -3.14159, -3.14159, -3.14159, -3.14159]), 
-        high=np.array([2.0944, 2.0944, 3.14159, 3.14159, 3.14159, 3.14159]), 
-        shape=(6,), dtype=np.float64
+        low=np.array([-2.0944, -2.0944, -3.14159, -3.14159, -3.14159, -3.14159, -3.14159]), 
+        high=np.array([2.0944, 2.0944, 3.14159, 3.14159, 3.14159, 3.14159, 3.14159]), 
+        shape=(7,), dtype=np.float64
     )
     observation_space = gym.spaces.Box(
         low=np.array([
@@ -45,7 +45,9 @@ class PickPlaceEnvCfg(GraspEnvCfg):
             -1, -1, -1, -1, # 4 object orientation quat
             -1.3, -1.3, -1.3, # 3 target position xyz
             -1, -1, -1, -1, # 4 target orientation quat
-            -2.0944, -2.0944, -3.14159, -3.14159, -3.14159, -3.14159 # 6 previous actions
+            -1, # gripper_width,
+            -1, # target_width,
+            -2.0944, -2.0944, -3.14159, -3.14159, -3.14159, -3.14159, -3.14159 # 7 previous actions
         ]),
         high=np.array([
             6.28319, 6.28319, 6.28319, 6.28319, 6.28319, 6.28319, # 6 joint positions
@@ -56,9 +58,11 @@ class PickPlaceEnvCfg(GraspEnvCfg):
             1, 1, 1, 1, # 4 object orientation quat
             1.3, 1.3, 1.3, # 3 target position xyz
             1, 1, 1, 1, # 4 target orientation quat
-            2.0944, 2.0944, 3.14159, 3.14159, 3.14159, 3.14159 # 6 previous actions
+            1, # gripper_width,
+            1, # target_width,
+            2.0944, 2.0944, 3.14159, 3.14159, 3.14159, 3.14159, 3.14159 # 7 previous actions
         ]), 
-        shape=(39,), dtype=np.float64
+        shape=(42,), dtype=np.float64
     )
     state_space = 0
     # simulation
@@ -73,15 +77,23 @@ class PickPlaceEnvCfg(GraspEnvCfg):
             friction_correlation_distance = 0.00625
         )
     )
-
-    episode_length_s = 6.0 # ~750k steps @ 125 Hz
+    # episode_length_steps = ceil(episode_length_s / (decimation_rate * physics_time_step))
+    episode_length_s = 6.0 # ceil(6.0 / (2 * 1/120)) = 360
 
     # scene
-    scene: InteractiveSceneCfg = PickPlaceSceneCfg(num_envs=512, env_spacing=2.5, replicate_physics=True)
+    scene: InteractiveSceneCfg = PickPlaceSceneCfg(num_envs=2048, env_spacing=2.5, replicate_physics=True)
+
+    # reward weights
+    distance_tanh_w = 0.1
+    distance_l2_w = -0.2
+    orientation_error_w = -0.1
+    reach_bonus_w = 1.0
+    grasp_bonus_w = 1.0
+    lift_bonus_w = 1.0
 
     # linear penalties
-    action_l2_w = 0.001
-    action_rate_l2_w = 0.005
+    action_l2_w = 0.00001
+    action_rate_l2_w = 0.00001
     joint_pos_limit_w = 0.1
     joint_vel_limit_w = 0.1
     min_link_distance_w = 0.1
@@ -89,13 +101,13 @@ class PickPlaceEnvCfg(GraspEnvCfg):
 
     # thresholds
     reach_pos_threshold = 0.02 # 2 cm
-    reach_rot_threshold = 0.2 # 11 deg
+    reach_rot_threshold = 0.1 # 5.73 deg
     grasp_force_threshold = 10.0 # 10 nm
     grasp_width_threshold = 0.005 # 5 mm
     minimal_lift_height = 0.04 # 4 cm
     maximal_lift_height = 0.10 # 10cm above table
-    place_pos_threshold = 0.05 # 5 cm
-    transport_pos_threshold = 0.07 # 7 cm
+    place_pos_threshold = 0.02 # 2 cm
+    transport_pos_threshold = 0.05 # 5 cm
     place_rot_threshold = 0.1  # 5.73 deg
     max_transport_dist = 0.65
 
@@ -110,7 +122,14 @@ class PickPlaceEnvCfg(GraspEnvCfg):
     # domain randomization
     object_pose_range = {"x": (-0.1, 0.1), "y": (-0.1, 0.1), "yaw": (-3.14, 3.14)}
     target_pose_range = {"x": (-0.1, 0.1), "y": (-0.1, 0.1), "yaw": (-3.14, 3.14)}
+    joint_pos_range = (-1.0, 1.0)
     
+    # experiments
+    observations = 'symmetric'
+    reward_variant = 'full'
+    auto_release_object = False
+    auto_freeze_on_success = False
+
 @configclass
 class PickPlaceEnvPlayCfg(PickPlaceEnvCfg):
     """Configuration for grasp environment during play/testing."""
