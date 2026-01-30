@@ -38,7 +38,7 @@ def convert_urdf_to_usd():
         self_collision=True,
         joint_drive=UrdfConverterCfg.JointDriveCfg(
             drive_type="force",
-            target_type="position",
+            target_type="velocity",
             gains=sim_utils.UrdfConverterCfg.JointDriveCfg.PDGainsCfg(
                 # If None, the stiffness is set to the value parsed from the URDF file.
                 stiffness=None,
