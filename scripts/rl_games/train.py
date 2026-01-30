@@ -30,6 +30,7 @@ parser.add_argument(
 parser.add_argument("--checkpoint", type=str, default=None, help="Path to model checkpoint.")
 parser.add_argument("--sigma", type=str, default=None, help="The policy's initial standard deviation.")
 parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy training iterations.")
+parser.add_argument("--log-dir", type=str, default=None, help="Directory to save logs and checkpoints.")
 parser.add_argument("--wandb-project-name", type=str, default=None, help="the wandb's project name")
 parser.add_argument("--wandb-entity", type=str, default=None, help="the entity (team) of wandb's project")
 parser.add_argument("--wandb-name", type=str, default=None, help="the name of wandb's run")
@@ -127,7 +128,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # specify directory for logging experiments
     config_name = agent_cfg["params"]["config"]["name"]
-    log_root_path = os.path.join("logs", "rl_games", config_name)
+    log_dir = args_cli.log_dir if args_cli.log_dir is not None else config_name
+    log_root_path = os.path.join("logs", "rl_games", log_dir)
     if "pbt" in agent_cfg:
         if agent_cfg["pbt"]["directory"] == ".":
             log_root_path = os.path.abspath(log_root_path)

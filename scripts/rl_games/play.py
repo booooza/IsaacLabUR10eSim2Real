@@ -94,6 +94,7 @@ from rl_games.common import env_configurations, vecenv
 from rl_games.common.player import BasePlayer
 from rl_games.torch_runner import Runner
 from scripts.rl_games.logger import PlayLogger
+from rl_games.algos_torch import flatten
 
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: dict):
@@ -270,10 +271,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
             if args_cli.debug and logger is not None:
                 logger.log_step(
-                    env.unwrapped.scene,
-                    env.unwrapped.common_step_counter,
+                    env.unwrapped,
                     dt,
-                    env.unwrapped.episode_length_buf,
                     episodes_completed
                 )
 
@@ -291,8 +290,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 if agent.is_rnn and agent.states is not None:
                     for s in agent.states:
                         s[:, dones, :] = 0.0
+        timestep += 1
         if args_cli.video:
-            timestep += 1
             # exit the play loop after recording one video
             if timestep == args_cli.video_length:
                 break
@@ -334,61 +333,49 @@ def export_to_onnx(agent, obs, save_path, opset_version=11):
         obs_tensor = torch.from_numpy(obs_tensor)
     
     # Take a single observation (batch size 1) for export
-    sample_input = obs_tensor[0:1].to(agent.device)
+    inputs = {
+        'obs' : torch.zeros((1,) + agent.obs_shape).to(agent.device),
+        'rnn_states' : agent.states,
+    }
     
-    # RL-Games models expect a dictionary input
-    # We need to create a wrapper that converts tensor input to the expected dict format
     class ModelWrapper(torch.nn.Module):
+        '''
+        Main idea is to ignore outputs which we don't need from model
+        '''
         def __init__(self, model):
-            super().__init__()
-            self.model = model
-        
-        def forward(self, obs):
-            # Convert tensor input to the dict format RL-Games expects
-            input_dict = {
-                'obs': obs,
-                'is_train': False  # Set to False for inference
-            }
-            output = self.model(input_dict)
+            torch.nn.Module.__init__(self)
+            self._model = model
             
-            # RL-Games typically returns a dict with 'mus' (actions) and 'values'
-            if isinstance(output, dict):
-                # Return actions and values as separate outputs
-                actions = output.get('mus', output.get('actions', None))
-                values = output.get('values', None)
-                
-                if values is not None:
-                    return actions, values
-                else:
-                    return actions
-            else:
-                return output
+            
+        def forward(self,input_dict):
+            input_dict['obs'] = self._model.norm_obs(input_dict['obs'])
+            '''
+            just model export doesn't work. Looks like onnx issue with torch distributions
+            thats why we are exporting only neural network
+            '''
+            #print(input_dict)
+            #output_dict = self._model.a2c_network(input_dict)
+            #input_dict['is_train'] = False
+            #return output_dict['logits'], output_dict['values']
+            return self._model.a2c_network(input_dict)
     
-    wrapped_model = ModelWrapper(model)
-    
-    # If the model is RNN, we need to handle states
-    if agent.is_rnn:
-        print("[INFO] Detected RNN model, exporting with initial states...")
-        print("[WARNING] RNN export not fully implemented, exporting without states")
-        # For now, just export the feedforward part
+    with torch.no_grad():
+        adapter = flatten.TracingAdapter(ModelWrapper(agent.model), inputs, allow_non_tensor=True)
+        traced = torch.jit.trace(adapter, adapter.flattened_inputs, check_trace=False)
+        flattened_outputs = traced(*adapter.flattened_inputs)
+        print(flattened_outputs)
     
     print("[INFO] Exporting feedforward model...")
     
     try:
         # Export with the wrapped model
         torch.onnx.export(
-            wrapped_model,
-            sample_input,
+            traced,
+            *adapter.flattened_inputs,
             save_path,
             input_names=['obs'],
-            output_names=['actions', 'values'],
-            dynamic_axes={
-                'obs': {0: 'batch'},
-                'actions': {0: 'batch'},
-                'values': {0: 'batch'}
-            },
+            output_names=['mu','log_std', 'value'],
             opset_version=opset_version,
-            do_constant_folding=True,
             export_params=True
         )
         
@@ -403,6 +390,7 @@ def export_to_onnx(agent, obs, save_path, opset_version=11):
             # Print model info
             print(f"[INFO] Model inputs: {[input.name for input in onnx_model.graph.input]}")
             print(f"[INFO] Model outputs: {[output.name for output in onnx_model.graph.output]}")
+            
             
         except Exception as e:
             print(f"[WARNING] ONNX model verification failed: {e}")
@@ -440,10 +428,12 @@ def export_actor_to_onnx(agent, obs, save_path, opset_version=11):
     if not isinstance(obs_tensor, torch.Tensor):
         obs_tensor = torch.from_numpy(obs_tensor)
     
-    # Take a single observation (batch size 1) for export
-    sample_input = obs_tensor[0:1].to(agent.device)
-    
-    # Create a wrapper that only returns actions
+    inputs = {
+        'obs' : torch.zeros((1,) + agent.obs_shape).to(agent.device),
+        'rnn_states' : agent.states,
+    }
+
+    # Wrapper that includes normalization
     class ActorWrapper(torch.nn.Module):
         def __init__(self, model):
             super().__init__()
@@ -452,25 +442,28 @@ def export_actor_to_onnx(agent, obs, save_path, opset_version=11):
         def forward(self, obs):
             # Convert tensor input to the dict format RL-Games expects
             input_dict = {
-                'obs': obs,
+                'obs': self.model.norm_obs(obs),
                 'is_train': False
             }
             output = self.model(input_dict)
             
-            # Return only the actions
+            # Return deterministic actions (mus)
             if isinstance(output, dict):
                 return output.get('mus', output.get('actions'))
             else:
                 return output[0] if isinstance(output, (tuple, list)) else output
-    
-    wrapped_model = ActorWrapper(model)
-    
-    print("[INFO] Exporting actor network...")
+            
+    with torch.no_grad():
+        adapter = flatten.TracingAdapter(ActorWrapper(agent.model), inputs, allow_non_tensor=True)
+        traced = torch.jit.trace(adapter, adapter.flattened_inputs, check_trace=False)
+        flattened_outputs = traced(*adapter.flattened_inputs)
+        
+    print("[INFO] Exporting actor network with normalization...")
     
     try:
         torch.onnx.export(
-            wrapped_model,
-            sample_input,
+            traced,
+            *adapter.flattened_inputs,
             save_path,
             input_names=['obs'],
             output_names=['actions'],

@@ -5,6 +5,7 @@ from pathlib import Path
 from datetime import datetime
 import torch
 from isaaclab.scene import InteractiveScene
+from isaaclab.envs import DirectRLEnv, VecEnvObs
 
 class PlayLogger:
     """Buffer logging data and write once at episode end. """
@@ -13,15 +14,28 @@ class PlayLogger:
         self.log_dir = Path(log_dir)
         self.trajectory_data = []
         self.header = None
+        self.has_object = None
         
-    def log_step(self, scene: InteractiveScene, step_count: int, dt: float, 
-                 episode_length_buf: torch.Tensor, episode_ids: torch.Tensor):
+    def log_step(self, env: DirectRLEnv, dt: float, episode_ids: torch.Tensor):
         """Accumulate data for one step (all envs)."""
+
+        scene = env.scene
+        step_count = env.common_step_counter
+        episode_length_buf = env.episode_length_buf
         
         robot = scene.articulations['robot']
         joint_names = robot._data.joint_names
         num_envs = robot._data.joint_pos.shape[0]
-        
+
+        if self.has_object is None:
+            # Use hasattr or try-except to check
+            try:
+                _ = scene['object_frame']
+                self.has_object = True
+            except (KeyError, AttributeError):
+                self.has_object = False
+            print(f"[INFO] Object frame {'found' if self.has_object else 'not found'} in scene")
+
         # Get all data (same as your original)
         joint_pos = robot._data.joint_pos
         joint_pos_target = robot._data.joint_pos_target
@@ -35,12 +49,17 @@ class PlayLogger:
         
         ee_frame_pos = scene['ee_frame'].data.target_pos_source
         ee_frame_rot = scene['ee_frame'].data.target_quat_source
-        hover_target_pos = scene['hover_target_frame'].data.target_pos_source
-        hover_target_rot = scene['hover_target_frame'].data.target_quat_source
-        object_pos = scene['object_frame'].data.target_pos_source
-        object_rot = scene['object_frame'].data.target_quat_source
-        target_pos = scene['target_frame'].data.target_pos_source
-        target_rot = scene['target_frame'].data.target_quat_source
+
+        if self.has_object:
+            object_pos = scene['object_frame'].data.target_pos_source
+            object_rot = scene['object_frame'].data.target_quat_source
+            if hasattr(env, 'obj_width_per_env'):
+                object_width = env.obj_width_per_env  # (num_envs,)
+            else:
+                object_width = torch.full((num_envs,), 0.03, device=env.device)
+
+        target_pos = env.target_pos
+        target_rot = env.target_quat
         
         sim_time = step_count * dt
         
@@ -81,44 +100,37 @@ class PlayLogger:
                 ee_frame_rot[env_id, 0, 2].item(),
                 ee_frame_rot[env_id, 0, 3].item()
             ])
-            # Add hover target positions
-            row.extend([
-                hover_target_pos[env_id, 0, 0].item(),
-                hover_target_pos[env_id, 0, 1].item(),
-                hover_target_pos[env_id, 0, 2].item()
-            ])
-            # Add hover target rotations
-            row.extend([
-                hover_target_rot[env_id, 0, 0].item(),
-                hover_target_rot[env_id, 0, 1].item(),
-                hover_target_rot[env_id, 0, 2].item(),
-                hover_target_rot[env_id, 0, 3].item()
-            ])
-            # Add object positions
-            row.extend([
-                object_pos[env_id, 0, 0].item(),
-                object_pos[env_id, 0, 1].item(),
-                object_pos[env_id, 0, 2].item()
-            ])
-            # Add object rotations
-            row.extend([
-                object_rot[env_id, 0, 0].item(),
-                object_rot[env_id, 0, 1].item(),
-                object_rot[env_id, 0, 2].item(),
-                object_rot[env_id, 0, 3].item()
-            ])
+            # Add object positions (or NA if not present)
+            if self.has_object:
+                row.extend([
+                    object_pos[env_id, 0, 0].item(),
+                    object_pos[env_id, 0, 1].item(),
+                    object_pos[env_id, 0, 2].item()
+                ])
+                # Add object rotations
+                row.extend([
+                    object_rot[env_id, 0, 0].item(),
+                    object_rot[env_id, 0, 1].item(),
+                    object_rot[env_id, 0, 2].item(),
+                    object_rot[env_id, 0, 3].item()
+                ])
+                row.append(object_width[env_id].item())
+            else:
+                # Add NA values for object pos and rot
+                row.extend(['NA'] * 8)  # 3 for pos + 4 for rot
+            
             # Add target positions
             row.extend([
-                target_pos[env_id, 0, 0].item(),
-                target_pos[env_id, 0, 1].item(),
-                target_pos[env_id, 0, 2].item()
+                target_pos[env_id, 0].item(),
+                target_pos[env_id, 1].item(),
+                target_pos[env_id, 2].item()
             ])
             # Add target rotations
             row.extend([
-                target_rot[env_id, 0, 0].item(),
-                target_rot[env_id, 0, 1].item(),
-                target_rot[env_id, 0, 2].item(),
-                target_rot[env_id, 0, 3].item()
+                target_rot[env_id, 0].item(),
+                target_rot[env_id, 1].item(),
+                target_rot[env_id, 2].item(),
+                target_rot[env_id, 3].item()
             ])
 
             self.trajectory_data.append(row)
@@ -156,14 +168,12 @@ class PlayLogger:
             self.header.extend(['ee_frame_pos_x', 'ee_frame_pos_y', 'ee_frame_pos_z'])
             # Add end effector rotation columns
             self.header.extend(['ee_frame_rot_w', 'ee_frame_rot_x', 'ee_frame_rot_y', 'ee_frame_rot_z'])
-            # Add hover target position columns
-            self.header.extend(['hover_target_pos_x', 'hover_target_pos_y', 'hover_target_pos_z'])
-            # Add hover target rotation columns
-            self.header.extend(['hover_target_rot_w', 'hover_target_rot_x', 'hover_target_rot_y', 'hover_target_rot_z'])
             # Add object position columns
             self.header.extend(['object_pos_x', 'object_pos_y', 'object_pos_z'])
             # Add object rotation columns
             self.header.extend(['object_rot_w', 'object_rot_x', 'object_rot_y', 'object_rot_z'])
+            # Add object width colum
+            self.header.extend(['object_width'])
             # Add target position columns
             self.header.extend(['target_pos_x', 'target_pos_y', 'target_pos_z'])
             # Add target rotation columns
