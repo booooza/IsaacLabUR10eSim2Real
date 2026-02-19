@@ -133,3 +133,19 @@ Some examples of packages that can likely be excluded are:
 "<path-to-isaac-sim>/extscache/omni.services.*"     // Services tools
 ...
 ```
+
+## Software Versions
+The implementation used Python 3.11.13 with Isaac Sim 5.0 (version 5.0.0-rc.45), 
+Isaac Lab 5.0 (version 2.2.1) (Nvidia, 2025), and PyTorch 2.7.0+cu128. 
+PPO training is performed using `rl_games` 1.6.1 (Makoviichuk, 2021)
+with TensorBoard 2.20.0 for experiment tracking. 
+
+(Nvidia, 2025): NVIDIA et al. Isaac Lab: A GPU-Accelerated Simulation Framework for Multi-
+Modal Robot Learning. Version Number: 1. 2025. DOI: 10.48550/ARXIV.2511.04831. URL: https://arxiv.org/abs/2511.04831
+
+(Makoviichuk, 2021): Denys Makoviichuk and Viktor Makoviychuk. “rl-games: A High-performance
+Framework for Reinforcement Learning”. In: GitHub, May 2021. URL: https://github.com/Denys88/rl_games
+
+## Acknowledgements
+
+This work was conducted as part of a semester project in the [Master of Science in Engineering (Data Science)](https://www.zhaw.ch/en/engineering/study/masters-degree-programme/profiles/data-science) programme at the [ZHAW School of Engineering](https://www.zhaw.ch/en/engineering), [Centre for Artificial Intelligence (CAI)](https://www.zhaw.ch/en/engineering/institutes-centres/cai), [Industrial Artificial Intelligence Group](https://www.zhaw.ch/en/engineering/institutes-centres/cai/industrial-artificial-intelligence-group), supervised by Prof. Dr. Alisa Rupenyan-Vasileva and Dr. Deepak Ingole.
